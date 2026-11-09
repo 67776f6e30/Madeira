@@ -2074,6 +2074,7 @@ struct LibraryLargeTitle: ToolbarContent {
 /// Symbol at the title's own size is nearly twice the height of its M.
 struct LibraryTitleText: View {
     @ObservedObject private var alignment = LibraryHeaderAlignment.shared
+    @ObservedObject private var fold = DeviceFold.shared
     @ObservedObject private var jitState = LibraryJITState.shared
     var body: some View {
         let jit = jitState.enabled
@@ -2088,7 +2089,7 @@ struct LibraryTitleText: View {
         }
         .font(.largeTitle.bold())
         .fixedSize()
-        .offset(x: alignment.shift)
+        .offset(x: alignment.shift + (fold.portraitFold ? 12 : 0))   // in from the open Duo's edge
         .background(LibraryTitleAnchor())   // after the offset: marks where the text is laid out
     }
 }
@@ -5586,6 +5587,8 @@ struct LibraryHUD: View {
     @ObservedObject private var model = LibraryModel.shared
     @ObservedObject private var controls = TouchControlsModel.shared
     @AppStorage(TouchControlStyle.key) private var controlStyle = "glass"
+    /// The folded Duo's deck has its own Menu key (FoldDeck.swift).
+    @ObservedObject private var foldDeck = FoldDeckState.shared
     /// A Madeira Dock start: its status, failure and Show desktop (DockStartScreen).
     @ObservedObject private var dockStart = DockStartScreen.shared
     private let sessionTools = MadeiraConfig.flag("MADEIRA_SESSION_TOOLS")
@@ -5628,10 +5631,10 @@ struct LibraryHUD: View {
                     // (and measured) all the same.
                     launchView(entry, geometry: geo).opacity(curtain.hidesStartingScreen ? 0 : 1)
                 }
-                if !model.startingScreen && model.performance { LibraryFloatingItem(isMenu: false, viewport: geo.size, insets: geo.safeAreaInsets) }
+                if !model.startingScreen && model.performance && !foldDeck.shown { LibraryFloatingItem(isMenu: false, viewport: geo.size, insets: geo.safeAreaInsets) }
                 if model.liveLogs && !model.startingScreen { LibraryLiveLogs().frame(maxWidth: 550, maxHeight: 140).padding(.top, Self.topInset(geo) + 60).padding(.horizontal, 12).allowsHitTesting(false) }
                 if !model.sessionMessage.isEmpty && !model.startingScreen { Text(model.sessionMessage).font(.caption).padding(10).background(.regularMaterial, in: Capsule()).frame(maxWidth: .infinity).padding(.top, Self.topInset(geo) + 12).allowsHitTesting(false) }
-                if !model.startingScreen { LibraryFloatingItem(isMenu: true, viewport: geo.size, insets: geo.safeAreaInsets) }
+                if !model.startingScreen && !foldDeck.shown { LibraryFloatingItem(isMenu: true, viewport: geo.size, insets: geo.safeAreaInsets) }
                 if model.menu {
                     Color.black.opacity(SessionMenuBackground.blur ? 0.3 : 0.5).ignoresSafeArea().onTapGesture { model.menu = false }.transition(.opacity)
                     (bindsPage ? AnyView(bindsMenu) : assistPage ? AnyView(assistMenu) : AnyView(menu))
