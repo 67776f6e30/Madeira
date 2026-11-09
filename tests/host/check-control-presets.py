@@ -230,6 +230,8 @@ final class EditorControls {
     static let shared = EditorControls()
     static let baseDiameter: CGFloat = 64
     var sizeScale = 1.0
+    /// The deck's fit (TouchControlsModel.fitScale, DeviceFold.swift); 1 off the deck.
+    var fitScale = 1.0
     var controls: [TouchControl] = []
     var selected: UUID? = UUID()
     var editing = true
