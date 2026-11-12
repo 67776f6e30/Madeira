@@ -2218,6 +2218,18 @@ static int ios_alias_write_is_trapped( uintptr_t addr )
     return prot >= 0 && !(prot & PROT_WRITE);
 }
 
+/* Base writeback for the GPR STR/STRB/STRH (immediate, 9-bit) cases of the
+ * write-fault store emulator: post-index (bits 11:10 = 01) and pre-index (11)
+ * add the signed imm9 to Rn once the store has landed. Rn 31 is SP and 29/30
+ * are FP/LR, which live outside __x[] (it has 29 entries). */
+static void ios_store_imm9_writeback( arm_thread_state64_t *st, int rn, int imm9 )
+{
+    if (rn == 31) st->__sp = (uint64_t)((int64_t)st->__sp + imm9);
+    else if (rn == 30) st->__lr = (uint64_t)((int64_t)st->__lr + imm9);
+    else if (rn == 29) st->__fp = (uint64_t)((int64_t)st->__fp + imm9);
+    else st->__x[rn] = (uint64_t)((int64_t)st->__x[rn] + imm9);
+}
+
 /* Adjacent guest pages need not occupy adjacent pool slots. Validate every
  * fragment before writing anything, then route each through its own alias.
  * Only ordinary stores use this; atomic RMW operations must remain atomic. */
@@ -5442,7 +5454,7 @@ static void *ios_mach_exception_thread( void *arg )
                         emulated = ios_alias_write( fault_addr, &value, sizeof(value), &alias_fault, honor_guest_prot );
                     }
                     /* STR (immediate, post/pre-index, 64-bit): 1111 1000 00 0imm9 0[10]1 Rn Rt */
-                    else if ((insn & 0xffe00000) == 0xf8000000 && (insn & 0x800) == 0)
+                    else if ((insn & 0xffe00000) == 0xf8000000 && ((insn >> 10) & 3) != 2)
                     {
                         int rt = insn & 0x1f;
                         uint64_t value = IOS_STORE_SRC(rt);
@@ -5456,11 +5468,11 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;  // sign-extend 9-bit
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            ios_store_imm9_writeback( &state, rn, imm9 );
                         }
                     }
                     /* STR (immediate, post/pre-index, 32-bit): 1011 1000 00 0imm9 0[10]1 Rn Rt */
-                    else if ((insn & 0xffe00000) == 0xb8000000 && (insn & 0x800) == 0)
+                    else if ((insn & 0xffe00000) == 0xb8000000 && ((insn >> 10) & 3) != 2)
                     {
                         int rt = insn & 0x1f;
                         uint32_t value = (uint32_t)IOS_STORE_SRC(rt);
@@ -5471,14 +5483,14 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            ios_store_imm9_writeback( &state, rn, imm9 );
                         }
                     }
                     /* STRB (immediate, post/pre-index, 8-bit): 0011 1000 00 0imm9 0[10]1 Rn Rt
                      * Hits when iOS memcpy handles the trailing bytes after the
                      * 8-byte D-store loop completes (660 bytes = 82*8 + 4 bytes
                      * tail; the tail is byte-by-byte). */
-                    else if ((insn & 0xffe00000) == 0x38000000 && (insn & 0x800) == 0)
+                    else if ((insn & 0xffe00000) == 0x38000000 && ((insn >> 10) & 3) != 2)
                     {
                         int rt = insn & 0x1f;
                         uint8_t value = (uint8_t)IOS_STORE_SRC(rt);
@@ -5489,11 +5501,11 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            ios_store_imm9_writeback( &state, rn, imm9 );
                         }
                     }
                     /* STRH (immediate, post/pre-index, 16-bit): 0111 1000 00 0imm9 0[10]1 Rn Rt */
-                    else if ((insn & 0xffe00000) == 0x78000000 && (insn & 0x800) == 0)
+                    else if ((insn & 0xffe00000) == 0x78000000 && ((insn >> 10) & 3) != 2)
                     {
                         int rt = insn & 0x1f;
                         uint16_t value = (uint16_t)IOS_STORE_SRC(rt);
@@ -5504,7 +5516,7 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            ios_store_imm9_writeback( &state, rn, imm9 );
                         }
                     }
                     /* SIMD/FP STR (immediate, post/pre-index, D-reg = 64-bit):

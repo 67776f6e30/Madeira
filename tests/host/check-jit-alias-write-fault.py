@@ -23,6 +23,12 @@ start = source.index('                    int aliased = ios_write_alias(')
 end = source.index('                    ++wr_seen;', start)
 policy = source[start:end]
 assert 'ios_alias_store_pair( insn, fault_addr, gpr, &alias_fault, honor_guest_prot )' in source
+# Jump King (Mono): STRH W10, [X12, #56]! (0x78038d8a) into fresh RWX memory was refused by
+# all four GPR STR imm9 cases, which tested bit 11 and so admitted only unscaled and post-index;
+# the store was redelivered ~1.1M times. Only 10 (STTR*, unprivileged) is left out.
+for top in ('0xf8000000', '0xb8000000', '0x38000000', '0x78000000'):
+    assert f"(insn & 0xffe00000) == {top} && ((insn >> 10) & 3) != 2" in source, top
+    assert f"(insn & 0xffe00000) == {top} && (insn & 0x800) == 0" not in source, top
 start = source.index('                int honor_guest_prot = 1;')
 end = source.index('                if (rw_addr && honor_guest_prot && ios_alias_write_is_trapped', start)
 honor = source[start:end]
@@ -84,6 +90,7 @@ uintptr_t ios_jit_anon_alias_lookup(uintptr_t addr)
 code += function('static uintptr_t ios_write_alias( uintptr_t addr )')
 code += function('static int ios_mach_emulate_casp(uint32_t insn, uintptr_t rw_addr, uint64_t gpr[29])')
 code += function('static int ios_alias_write_is_trapped( uintptr_t addr )')
+code += function('static void ios_store_imm9_writeback( arm_thread_state64_t *st, int rn, int imm9 )')
 code += function('static int ios_alias_write( uintptr_t addr, const void *source, size_t size, uintptr_t *blocked,\n                            int honor_guest_prot )')
 code += function('static int ios_alias_store_pair( uint32_t insn, uintptr_t addr, uint64_t gpr[32], uintptr_t *blocked,\n                                 int honor_guest_prot )')
 # The exported wrapper, its prototype of the _ex form, then the _ex body (second occurrence).
@@ -313,6 +320,15 @@ int main(void)
     assert(!ios_mach_emulate_casp(0x4867fc02u, (uintptr_t)cell, g));     /* odd Rs */
     assert(!ios_mach_emulate_casp(0x487cfc02u, (uintptr_t)cell, g));     /* Rs+1 = x29 */
     assert(!ios_mach_emulate_casp(0xc8e9fec8u, (uintptr_t)cell, g));     /* CASAL, not a pair */
+    {   /* imm9 writeback reaches SP, LR and FP, which are not in __x[] */
+        arm_thread_state64_t wb = {0};
+        wb.__x[12] = 0x1000; wb.__sp = 0x2000; wb.__lr = 0x3000; wb.__fp = 0x4000;
+        ios_store_imm9_writeback(&wb, 12, 56);  assert(wb.__x[12] == 0x1038);
+        ios_store_imm9_writeback(&wb, 31, -16); assert(wb.__sp == 0x1ff0);
+        ios_store_imm9_writeback(&wb, 30, 8);   assert(wb.__lr == 0x3008);
+        ios_store_imm9_writeback(&wb, 29, -256); assert(wb.__fp == 0x3f00);
+        assert(wb.__x[28] == 0);
+    }
     munmap(backing, 3 * 0x4000);
     munmap(rx, n); munmap(rw, n); fclose(f);
     puts("PASS: alias protection preserved; FEX handler stores complete; CASPAL; STP widths, writeback, bounds and registers");
