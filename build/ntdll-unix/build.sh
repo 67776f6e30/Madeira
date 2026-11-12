@@ -169,10 +169,38 @@ if [ ${#GNUTLS_DEFS[@]} -gt 0 ]; then
 fi
 # OpenGL: opengl32's unix side (wrappers + generated thunks). It dispatches to
 # win32u's WGL layer, whose iOS driver is build/win32u-unix/opengl_ios.c.
-compile_unixlib "$WINE_SRC/dlls/opengl32/unix_wgl.c" "opengl32_wgl" "opengl32" \
-    -I"$WINE_SRC/dlls/opengl32"
-compile_unixlib "$WINE_SRC/dlls/opengl32/unix_thunks.c" "opengl32_thunks" "opengl32" \
-    -I"$WINE_SRC/dlls/opengl32"
+#
+# It is compiled from a copy patched with patches/wine-opengl-winios.patch:
+# OpenGL ES contexts for the winios WGL driver, and wow64 thunks that turn the
+# 32-bit guest pointers in their arguments into host ones (ios_wow_host_ptr).
+# The wine submodule does not carry that patch and docs/BUILDING.md had it
+# applied by hand, so CI built the plain thunks: a 32-bit GL game (Celeste with
+# FNA3D on OpenGL) died at its first WGL call, reading WowTebOffset through
+# its 32-bit TEB address 0x302000 without the guest window's base. A wine tree
+# that already has the patch is compiled as it is.
+GL_PATCH="$REPO_ROOT/patches/wine-opengl-winios.patch"
+GL_SRC_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/madeira-opengl32.XXXXXX")"
+trap 'rm -rf "$GL_SRC_ROOT"' EXIT
+mkdir -p "$GL_SRC_ROOT/dlls"
+cp -R "$WINE_SRC/dlls/opengl32" "$GL_SRC_ROOT/dlls/opengl32"
+if (cd "$GL_SRC_ROOT" && git apply --include='dlls/opengl32/*' --check "$GL_PATCH" 2>/dev/null); then
+    (cd "$GL_SRC_ROOT" && git apply --include='dlls/opengl32/*' "$GL_PATCH")
+    echo "  opengl32: patches/wine-opengl-winios.patch applied to a copy"
+elif (cd "$GL_SRC_ROOT" && git apply --include='dlls/opengl32/*' --reverse --check "$GL_PATCH" 2>/dev/null); then
+    echo "  opengl32: the wine tree already has patches/wine-opengl-winios.patch"
+else
+    echo "ERROR: patches/wine-opengl-winios.patch does not apply to wine/dlls/opengl32" >&2
+    exit 1
+fi
+GL_SRC="$GL_SRC_ROOT/dlls/opengl32"
+grep -q 'ios_wow_host_ptr' "$GL_SRC/unix_private.h" || {
+    echo "ERROR: opengl32's wow64 thunks lack ios_wow_host_ptr after patching" >&2
+    exit 1
+}
+compile_unixlib "$GL_SRC/unix_wgl.c" "opengl32_wgl" "opengl32" \
+    -I"$GL_SRC"
+compile_unixlib "$GL_SRC/unix_thunks.c" "opengl32_thunks" "opengl32" \
+    -I"$GL_SRC"
 # Vulkan: winevulkan's unix side (instance/device wrappers + generated thunks).
 # It dispatches to win32u's Vulkan layer (build/win32u-unix/vulkan_ios.c), which
 # loads the session's Vulkan library (MADEIRA_VULKAN_LIBRARY; off by default).
