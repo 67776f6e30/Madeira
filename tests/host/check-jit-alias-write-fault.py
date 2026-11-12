@@ -86,7 +86,11 @@ code += function('static int ios_mach_emulate_casp(uint32_t insn, uintptr_t rw_a
 code += function('static int ios_alias_write_is_trapped( uintptr_t addr )')
 code += function('static int ios_alias_write( uintptr_t addr, const void *source, size_t size, uintptr_t *blocked,\n                            int honor_guest_prot )')
 code += function('static int ios_alias_store_pair( uint32_t insn, uintptr_t addr, uint64_t gpr[32], uintptr_t *blocked,\n                                 int honor_guest_prot )')
-code += function('int ios_store_split_crossing( uint32_t insn, arm_thread_state64_t *st,')
+# The exported wrapper, its prototype of the _ex form, then the _ex body (second occurrence).
+code += function('static int ios_store_split_crossing_ex( uint32_t insn, arm_thread_state64_t *st,')
+_ex = source.index('static int ios_store_split_crossing_ex( uint32_t insn, arm_thread_state64_t *st,',
+                   source.index('int ios_store_split_crossing( uint32_t insn, arm_thread_state64_t *st,'))
+code += source[_ex:source.index('\n}', _ex) + 2] + '\n'
 code += r'''
 static uintptr_t fex_pool_start, fex_pool_end;
 int ios_jit_pool_pc_is_fex(uintptr_t pc) { return pc >= fex_pool_start && pc < fex_pool_end; }
@@ -253,6 +257,29 @@ int main(void)
     memset(backing, 0x5a, 3 * 0x4000);
     assert(ios_store_split_crossing(pair, &state, NULL, 0, 0, 0) == -1);
     assert(backing[0x3fff] == 0x5a && state.__sp == second_rx - 8);
+    /* Stardew Valley: STUR X20, [X1, #2] (0xf8002034) six bytes before a code page
+       that FEX still write-protects. The refusal names that page, so the guest
+       fault goes there instead of back to the FAR's already-untrapped page. */
+    blocked = 0;
+    assert(ios_store_split_crossing_ex(pair, &state, NULL, 0, 0, 0, &blocked) == -1 && blocked == second_rx);
+    {
+        arm_thread_state64_t stur = {0};
+        stur.__x[1] = second_rx - 8; stur.__x[20] = 0x1122334455667788ull; stur.__pc = jit_pc;
+        blocked = 0;
+        assert(ios_store_split_crossing_ex(0xf8002034u, &stur, NULL, 0, 0, 0, &blocked) == -1);
+        assert(blocked == second_rx && backing[0x3ffa] == 0x5a && backing[0x8000] == 0x5a);
+        trapped_page = anon_rx + 0x3000;                          /* the first page is the trapped one */
+        blocked = 0;
+        assert(ios_store_split_crossing_ex(0xf8002034u, &stur, NULL, 0, 0, 0, &blocked) == -1);
+        assert(blocked == second_rx - 6);                        /* its first byte, as ios_alias_write */
+        trapped_page = 0;                                         /* FEX untrapped it: the store completes */
+        blocked = 0;
+        assert(ios_store_split_crossing_ex(0xf8002034u, &stur, NULL, 0, 0, 0, &blocked) == 1 && !blocked);
+        uint64_t v = 0; memcpy(&v, backing + 0x3ffa, 6); memcpy((unsigned char *)&v + 6, backing + 0x8000, 2);
+        assert(v == 0x1122334455667788ull && stur.__x[1] == second_rx - 8);
+        trapped_page = second_rx;
+        memset(backing, 0x5a, 3 * 0x4000);
+    }
     trapped_page = 0;
     assert(ios_store_split_crossing(pair, &state, NULL, 0, 0, 0) == 1);
     assert(state.__sp == second_rx + 8);

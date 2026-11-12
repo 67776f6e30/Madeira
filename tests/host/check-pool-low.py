@@ -121,7 +121,7 @@ assert 'ios_write_alias( at + length - 1 ) != rw + length - 1) return 0;' in \
 assert 'ios_alias_write( effective, values, sizeof(values), &alias_fault, honor_guest_prot )' in signal, \
     'STP Q goes through the fragment check'
 assert 'ios_write_alias( a + len - 1 ) != part_rw[parts] + len - 1' in \
-    function(signal, 'int ios_store_split_crossing('), 'a page-crossing store never leaves C either'
+    function(signal, 'size_t sz, uintptr_t *blocked )\n{'), 'a page-crossing store never leaves C either'
 assert signal.count('ios_jit_low_contains( (uintptr_t)fault_pc )') >= 2, 'Mach exec-fault branch and LDAPR backpatch'
 assert 'ios_jit_low_rw_contains( (uintptr_t)fault_pc )))   /* madeira-bcd pool-low */' in signal, 'RW-alias pc redirect'
 assert 'ios_jit_low_contains( (uintptr_t)fa );   /* madeira-bcd pool-low */' in signal, 'exec recovery'
