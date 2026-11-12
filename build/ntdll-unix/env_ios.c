@@ -532,7 +532,17 @@ static void set_process_name( const char *name )
     if ((p = strrchr( name, '\\' ))) name = p + 1;
     if ((p = strrchr( name, '/' ))) name = p + 1;
 #ifdef HAVE_SETPROGNAME
-    setprogname( name );
+    {
+        /* Madeira: setprogname() keeps the pointer, not a copy, and on iOS the
+         * name lives in the app's process for good. Here argv is the launching
+         * thread's (WineProcessBridge.m: a local exe_path buffer), gone once a
+         * game exits; the next system reader of getprogname() then crashed the
+         * app (LonaRPG: nwi_state_copy -> strdup on a dead stack after the
+         * game quit). Hand it a copy that lives as long as the process. */
+        static char progname[256];
+        snprintf( progname, sizeof(progname), "%s", name );
+        setprogname( progname );
+    }
 #endif
 #ifdef HAVE_PRCTL
 #ifndef PR_SET_NAME
