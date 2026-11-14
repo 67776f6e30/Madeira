@@ -2055,8 +2055,8 @@ enum LibraryRendererBadge {
 /// "Madeira" as a large title at the leading edge of the navigation bar, on the
 /// row of the toolbar buttons (the system large title would sit on a row of its
 /// own below them), in the large title font, with no Liquid Glass capsule
-/// behind it on iOS 26. LibraryHeaderAlignment lines its first letter up with
-/// the search field below.
+/// behind it on iOS 26. The system owns its position, including when toolbar
+/// buttons move to the side on Duo.
 struct LibraryLargeTitle: ToolbarContent {
     var body: some ToolbarContent {
         if #available(iOS 26.0, *) {
@@ -2073,23 +2073,25 @@ struct LibraryLargeTitle: ToolbarContent {
 /// The bolt is as tall as the title's capitals and centred on them: an SF
 /// Symbol at the title's own size is nearly twice the height of its M.
 struct LibraryTitleText: View {
-    @ObservedObject private var alignment = LibraryHeaderAlignment.shared
     @ObservedObject private var jitState = LibraryJITState.shared
+    private static func titleFont() -> UIFont {
+        let base = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .largeTitle)
+        return UIFont(descriptor: base.withSymbolicTraits(.traitBold) ?? base, size: 0)
+    }
     var body: some View {
         let jit = jitState.enabled
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(LibraryHeaderAlignment.title).accessibilityAddTraits(.isHeader)
+            Text("Madeira").accessibilityAddTraits(.isHeader)
             Image(systemName: jit ? "bolt.fill" : "bolt")
-                .font(.system(size: LibraryHeaderAlignment.titleFont().pointSize * 0.53, weight: .thin))
+                .font(.system(size: Self.titleFont().pointSize * 0.53, weight: .thin))
                 .foregroundStyle(jit ? Color.accentColor : Color.primary)
                 .contentTransition(.symbolEffect(.replace))
-                .alignmentGuide(.firstTextBaseline) { d in d.height / 2 + LibraryHeaderAlignment.titleFont().capHeight / 2 }
+                .alignmentGuide(.firstTextBaseline) { d in d.height / 2 + Self.titleFont().capHeight / 2 }
                 .accessibilityLabel(jit ? L("JIT enabled") : L("JIT not enabled"))
         }
         .font(.largeTitle.bold())
         .fixedSize()
-        .offset(x: alignment.shift)
-        .background(LibraryTitleAnchor())   // after the offset: marks where the text is laid out
+        .allowsHitTesting(false)
     }
 }
 
@@ -2112,224 +2114,23 @@ final class LibraryJITState: ObservableObject {
     }
 }
 
-/// Lines the large title's first letter up with the search field below it. The
-/// navigation bar's leading inset differs between iOS versions (the title sat
-/// 4 pt inside the field on iOS 26.2 and level with its edge on iOS 27, before
-/// the glyph's own side bearing), so the offset is measured: the field's leading
-/// edge and the title's frame, both in window coordinates, less the side
-/// bearing of the title's first glyph. Checked in the iOS 26.2 and iOS 27
-/// simulators: the M starts on the field's edge to the pixel on both.
-final class LibraryHeaderAlignment: ObservableObject {
-    static let shared = LibraryHeaderAlignment()
-    static let title = "Madeira"
-    @Published private(set) var shift: CGFloat = 0
-    weak var field: UIView?
-    weak var anchor: UIView?
-    private var pending = false
-
-    /// Called from layout passes; measures once they have finished, when the
-    /// search field and the title are both at their final positions.
-    func update() {
-        guard !pending else { return }
-        pending = true
-        DispatchQueue.main.async { self.pending = false; self.measure(retries: 0) }
+/// Navigation and search belong to the selected tab's own stack. Using the
+/// native search modifier lets UIKit coordinate the search field with horizontal
+/// and vertical bars without a zero-sized controller editing an ancestor's item.
+private struct LibraryTabNavigation: ViewModifier {
+    @Binding var search: String
+    let prompt: String
+    private var systemScrollEdge: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
     }
-    private func measure(retries: Int) {
-        guard let field, let anchor, let window = field.window, anchor.window === window else { return }
-        guard field.bounds.width > 0, anchor.bounds.width > 0 else {   // not laid out yet
-            if retries < 20 { DispatchQueue.main.async { self.measure(retries: retries + 1) } }
-            return
-        }
-        let fieldX = field.convert(field.bounds, to: nil).minX
-        let titleX = anchor.convert(anchor.bounds, to: nil).minX
-        let scale = window.screen.scale
-        let target = ((fieldX - titleX - Self.inkInset()) * scale).rounded() / scale
-        if abs(target - shift) > 0.01 { shift = target }
-    }
-
-    /// The title's font: the large title style, bold, at the current text size.
-    static func titleFont() -> UIFont {
-        let base = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .largeTitle)
-        return UIFont(descriptor: base.withSymbolicTraits(.traitBold) ?? base, size: 0)
-    }
-
-    /// How far the first glyph's ink starts right of the text's origin, in the
-    /// title's font.
-    static func inkInset() -> CGFloat {
-        let font = titleFont() as CTFont
-        guard var unit = title.utf16.first else { return 0 }
-        var glyph: CGGlyph = 0
-        guard CTFontGetGlyphsForCharacters(font, &unit, &glyph, 1) else { return 0 }
-        var rect = CGRect.zero
-        CTFontGetBoundingRectsForGlyphs(font, .horizontal, &glyph, &rect, 1)
-        return rect.minX
-    }
-}
-
-/// Marks where the title's text is laid out (before its alignment offset).
-struct LibraryTitleAnchor: UIViewRepresentable {
-    func makeUIView(context: Context) -> Anchor { Anchor() }
-    func updateUIView(_ view: Anchor, context: Context) {}
-    final class Anchor: UIView {
-        override init(frame: CGRect) { super.init(frame: frame); isUserInteractionEnabled = false }
-        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-        override func didMoveToWindow() { super.didMoveToWindow(); report() }
-        override func layoutSubviews() { super.layoutSubviews(); report() }
-        private func report() {
-            guard window != nil else { return }
-            LibraryHeaderAlignment.shared.anchor = self
-            LibraryHeaderAlignment.shared.update()
-        }
-    }
-}
-
-/// A search controller whose bar reports its layout to LibraryHeaderAlignment.
-final class ReportingSearchController: UISearchController {
-    private lazy var reportingBar = ReportingSearchBar()
-    override var searchBar: UISearchBar { reportingBar }
-}
-final class ReportingSearchBar: UISearchBar {
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        LibraryHeaderAlignment.shared.field = searchTextField
-        LibraryHeaderAlignment.shared.update()
-    }
-}
-
-/// The library's search field: the system search bar (Liquid Glass on iOS 26),
-/// stacked under the navigation bar at full width, with the Madeira title and
-/// the toolbar buttons on the row above it. A UISearchController on the
-/// NavigationStack's own navigation item: `.searchable` shows nothing here (the
-/// TabView sits inside the NavigationStack). Removed again when the library
-/// goes away, so the developer screen has no search bar. Checked in the iOS
-/// simulator: the title and the toolbar buttons share a centre line, and the
-/// field spans the screen on both tabs.
-struct LibraryNavSearch: UIViewControllerRepresentable {
-    @Binding var text: String
-    let placeholder: String
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeUIViewController(context: Context) -> Host {
-        let host = Host()
-        host.coordinator = context.coordinator
-        return host
-    }
-    func updateUIViewController(_ host: Host, context: Context) {
-        context.coordinator.parent = self
-        host.apply()
-        // SwiftUI rebuilds the navigation item when the toolbar changes (the
-        // library's buttons leave with the Settings tab) and can drop the search
-        // controller on the way; put it back once that update has landed.
-        DispatchQueue.main.async { host.apply() }
-    }
-    static func dismantleUIViewController(_ host: Host, coordinator: Coordinator) { host.remove() }
-
-    final class Coordinator: NSObject, UISearchResultsUpdating, UISearchBarDelegate, UIGestureRecognizerDelegate {
-        var parent: LibraryNavSearch
-        let controller = ReportingSearchController(searchResultsController: nil)
-        private var outsideTap: UITapGestureRecognizer?
-        var bar: UISearchBar { controller.searchBar }
-
-        init(_ parent: LibraryNavSearch) {
-            self.parent = parent
-            super.init()
-            controller.obscuresBackgroundDuringPresentation = false
-            controller.hidesNavigationBarDuringPresentation = false
-            controller.searchResultsUpdater = self
-            bar.delegate = self
-            bar.autocapitalizationType = .none
-            bar.autocorrectionType = .no
-            bar.returnKeyType = .search
-        }
-        func updateSearchResults(for searchController: UISearchController) {
-            let t = searchController.searchBar.text ?? ""
-            if t != parent.text { parent.text = t }
-        }
-        func searchBarSearchButtonClicked(_ searchBar: UISearchBar) { searchBar.resignFirstResponder() }
-
-        // While the field is being edited, any tap outside it closes the keyboard.
-        // The tap still reaches whatever was tapped (cancelsTouchesInView = false).
-        func searchBarTextDidBeginEditing(_ searchBar: UISearchBar) {
-            guard outsideTap == nil, let window = searchBar.window else { return }
-            let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutside))
-            tap.cancelsTouchesInView = false
-            tap.delegate = self
-            window.addGestureRecognizer(tap)
-            outsideTap = tap
-        }
-        func searchBarTextDidEndEditing(_ searchBar: UISearchBar) {
-            if let tap = outsideTap { tap.view?.removeGestureRecognizer(tap) }
-            outsideTap = nil
-        }
-        @objc private func tappedOutside() { bar.resignFirstResponder() }
-
-        /// A tab switch squeezes the field a little and lets it spring back, like
-        /// a Liquid Glass control answering a touch (there is no public call that
-        /// plays the glass's own touch response). The system spring, on the bar's
-        /// layer only, so the navigation bar's layout never sees a transform.
-        /// Checked in the iOS 27 simulator (at 4%; now 1.5%): in, a slight overshoot,
-        /// settled in about half a second, running alongside the toolbar's glass morph.
-        func squeeze() {
-            guard !UIAccessibility.isReduceMotionEnabled else { return }
-            let layer = bar.layer
-            let now = layer.convertTime(CACurrentMediaTime(), from: nil)
-            let squeezed = 0.985, inTime = 0.12
-            let back = CASpringAnimation(perceptualDuration: 0.5, bounce: 0.5)
-            back.keyPath = "transform.scale"
-            back.fromValue = squeezed
-            back.toValue = 1
-            back.beginTime = now + inTime
-            back.duration = back.settlingDuration
-            back.fillMode = .backwards   // holds the squeezed size until it starts
-            let inward = CABasicAnimation(keyPath: "transform.scale")
-            inward.fromValue = 1
-            inward.toValue = squeezed
-            inward.beginTime = now
-            inward.duration = inTime
-            inward.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            layer.add(back, forKey: "madeira.search.squeeze.back")
-            layer.add(inward, forKey: "madeira.search.squeeze.in")   // added last: shown over the held spring
-        }
-        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            !(touch.view?.isDescendant(of: bar) ?? false)
-        }
-        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
-    }
-
-    final class Host: UIViewController {
-        weak var coordinator: Coordinator?
-        private weak var owner: UIViewController?
-        override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); apply() }
-
-        func apply() {
-            guard let c = coordinator else { return }
-            if c.bar.text != c.parent.text { c.bar.text = c.parent.text }
-            if c.bar.placeholder != c.parent.placeholder {
-                if c.bar.placeholder != nil {   // a tab switch: crossfade instead of jumping
-                    let fade = CATransition(); fade.type = .fade; fade.duration = 0.25
-                    c.bar.searchTextField.layer.add(fade, forKey: "madeira.search.fade")
-                    c.squeeze()
-                }
-                c.bar.placeholder = c.parent.placeholder
-            }
-            // The NavigationStack's own view controller owns the navigation item.
-            var vc: UIViewController? = self
-            while let v = vc, !(v.parent is UINavigationController) { vc = v.parent }
-            guard let target = vc else { return }
-            owner = target
-            let item = target.navigationItem
-            if item.searchController !== c.controller { item.searchController = c.controller }
-            if item.preferredSearchBarPlacement != .stacked { item.preferredSearchBarPlacement = .stacked }
-            if item.hidesSearchBarWhenScrolling { item.hidesSearchBarWhenScrolling = false }
-            // iOS 26 otherwise moves it to the bottom of an iPhone screen, beside the tab bar.
-            if #available(iOS 26.0, *), item.searchBarPlacementAllowsToolbarIntegration {
-                item.searchBarPlacementAllowsToolbarIntegration = false
-            }
-        }
-        func remove() {
-            coordinator?.bar.resignFirstResponder()
-            if let owner, owner.navigationItem.searchController === coordinator?.controller { owner.navigationItem.searchController = nil }
-        }
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
+            .toolbarBackground(.regularMaterial, for: .navigationBar)
+            .toolbarBackground(systemScrollEdge ? .automatic : .visible, for: .navigationBar)
     }
 }
 
@@ -3377,34 +3178,31 @@ struct LibraryView: View {
             }
     }
     var body: some View {
-        // The system tab bar: on iOS 26 it is the floating Liquid Glass bar whose
-        // glass selection slides between the tabs and follows a drag. Icons only; the
-        // names stay for VoiceOver.
+        // Tabs own navigation stacks, so pushing a Settings page keeps the tab
+        // controls alive. Each stack supplies its own toolbar and search field
+        // to the shared vertical bar on Duo, just as it does for horizontal bars.
         TabView(selection: Binding(get: { tab }, set: { switchTab(to: $0) })) {
-            // The card layouts: the zoomable page or the original one (LibraryGridArm).
-            Group { if LibraryGridArm.zoomable(setting: zoomableGrid, layout: layout) { zoomableLibrary } else { library } }
-                .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
-                .tabItem { Image(systemName: "square.grid.2x2.fill").accessibilityLabel("Library") }
-                .tag(0)
-            settingsTab
-                .tabItem { Image(systemName: "gearshape.fill").accessibilityLabel("Settings") }
-                .tag(1)
-        }
-        // The system search field (Liquid Glass on iOS 26) in the title's place, left
-        // of the library's buttons, on both tabs; each tab keeps its own text.
-        .background(LibraryNavSearch(text: tab == 0 ? $search : $settingsSearch,
-                                     placeholder: tab == 0 ? L("Search your library") : L("Search settings"))
-            .frame(width: 0, height: 0))
-        // Each tab is hosted by the tab bar controller, so a toolbar set inside a tab
-        // would not reach the navigation bar: the library's lives here.
-        // The title is a large leading toolbar item, level with the library's
-        // buttons like an App Store tab title; the bar's centred one is cleared.
-        // The trailing glass group changes with the tab (switchTab animates it),
-        // which iOS 26 draws as a Liquid Glass morph between the two.
-        .navigationTitle("")
-        .toolbar {
-            LibraryLargeTitle()
-            if tab == 0 { libraryToolbar } else { settingsToolbar }
+            NavigationStack {
+                Group { if LibraryGridArm.zoomable(setting: zoomableGrid, layout: layout) { zoomableLibrary } else { library } }
+                    .background(Color(uiColor: .systemGroupedBackground).ignoresSafeArea())
+                    .modifier(LibraryTabNavigation(search: $search, prompt: L("Search your library")))
+                    .toolbar {
+                        LibraryLargeTitle()
+                        libraryToolbar
+                    }
+            }
+            .tabItem { Label("Library", systemImage: "square.grid.2x2.fill") }
+            .tag(0)
+            NavigationStack {
+                settingsTab
+                    .modifier(LibraryTabNavigation(search: $settingsSearch, prompt: L("Search settings")))
+                    .toolbar {
+                        LibraryLargeTitle()
+                        settingsToolbar
+                    }
+            }
+            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            .tag(1)
         }
         // On the tab view, not inside one tab's page: an alert attached to the Library
         // page cannot present while Settings is showing, so an error raised there (its

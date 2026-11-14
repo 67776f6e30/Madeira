@@ -1278,11 +1278,6 @@ struct MadeiraMetalView: UIViewRepresentable {
 }
 
 struct ContentView: View {
-    /// iOS 26 and later blur content under the navigation bar themselves.
-    private static var systemScrollEdge: Bool {
-        if #available(iOS 26.0, *) { return true }
-        return false
-    }
     @State private var devSheet: SettingsSheet?
     @StateObject private var logStore = LogStore.shared
     @StateObject private var jitCoordinator = JITCoordinator.shared
@@ -1311,97 +1306,88 @@ struct ContentView: View {
     }
 
     var body: some View {
-        /* ml658: was NavigationView, which is deprecated and — the reason this
-         * matters — defaults to a SPLIT VIEW on iPad. TARGETED_DEVICE_FAMILY is
-         * "1,2", so iPad is a shipping target, and the whole UI was being forced
-         * into a sidebar/detail arrangement it was never laid out for.
-         * NavigationStack is single-column on every device. Safe here: there are
-         * no NavigationLinks anywhere in the app, so nothing depended on the
-         * two-column selection behaviour. */
-        NavigationStack {
-            Group {
-                if library.enabled && library.current != nil {
-                    sessionBody
-                        .navigationBarHidden(true)
-                } else if library.enabled {
-                    LibraryView(play: launchLibraryEntry, enableJIT: enableJIT,
-                                startDock: { startDock($0, compactPool: $1) })
-                } else {
+        // The library owns the TabView and each tab's NavigationStack. Wrapping
+        // the TabView in another stack gives the tab bar and toolbar different
+        // navigation owners, and pushes the entire tab interface away when a
+        // Settings page opens. Duo combines those bars along the same edge.
+        Group {
+            if library.enabled && library.current != nil {
+                sessionBody
+            } else if library.enabled {
+                LibraryView(play: launchLibraryEntry, enableJIT: enableJIT,
+                            startDock: { startDock($0, compactPool: $1) })
+            } else {
+                NavigationStack {
                     developerBody
+                        .navigationTitle("Madeira")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbarBackground(.regularMaterial, for: .navigationBar)
                 }
             }
-            .navigationTitle("Madeira")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.regularMaterial, for: .navigationBar)
-            // The library keeps a material bar only before iOS 26. From iOS 26 the
-            // system draws its soft scroll edge effect instead: content scrolls
-            // under the title, the buttons and the search field behind a
-            // progressive blur (as in the App Store), with no hard edge.
-            .toolbarBackground(library.enabled && !Self.systemScrollEdge ? .visible : .automatic, for: .navigationBar)
-            // A second session cannot start in this process; offer to close Madeira.
-            .alert("Restart Madeira", isPresented: Binding(get: { library.restartNotice != nil },
-                                                            set: { if !$0 { library.restartNotice = nil } })) {
-                Button("Close Madeira") {
-                    LogStore.shared.log("[session-once] closed by the user for a restart")
-                    exit(0)
-                }
-                Button("Later", role: .cancel) { library.restartNotice = nil }
-            } message: { Text(library.restartNotice ?? "") }
-            // CS_DEBUGGED without a debugger (JIT enabled outside Madeira): offer Madeira's own request.
-            .alert("Enable JIT", isPresented: Binding(get: { library.jitNotice != nil },
-                                                      set: { if !$0 { library.jitNotice = nil } })) {
-                Button("Enable JIT") { library.jitNotice = nil; enableJIT() }
-                Button("Later", role: .cancel) { library.jitNotice = nil }
-            } message: { Text(library.jitNotice ?? "") }
-            .sheet(isPresented: $jitCoordinator.showSetup) { JITSetupView() }
-            // A Steam game's saves may not be the latest (cloudClear).
-            .alert(library.cloudNotice?.title ?? "Steam Cloud", isPresented: Binding(get: { library.cloudNotice != nil },
-                                                                                     set: { if !$0 { library.cloudNotice = nil } })) {
-                if let notice = library.cloudNotice {
-                    switch notice.kind {
-                    case .syncing: Button("Wait and sync") { library.cloudNotice = nil; cloudWait(notice.appID) }
-                    case .unchecked: Button("Try again") { library.cloudNotice = nil; cloudWait(notice.appID) }
-                    case .conflict:
-                        Button("Choose") {
-                            library.cloudNotice = nil; library.cloudRetry = nil
-                            library.showDetail = library.entries.first { $0.steamAppID == notice.appID }?.id
-                        }
-                    }
-                    Button("Launch anyway") {
-                        LogStore.shared.log("[steam-cloud] app=\(notice.appID) before-play: launched anyway")
-                        library.cloudNotice = nil; library.cloudBypass = notice.appID
-                        let retry = library.cloudRetry; library.cloudRetry = nil; retry?()
-                    }
-                    Button("Cancel", role: .cancel) { library.cloudNotice = nil; library.cloudRetry = nil }
-                }
-            } message: { Text(library.cloudNotice?.message ?? "") }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                library.refreshFlag()
-                if library.enabled && library.current == nil { MetalHostView.shared.isHidden = true }
-            }
-            .onAppear {
-                jit_install_trap_handler()
-                entitlements = EntitlementStatus.check()
-                logEntitlementStatus()
-                logStore.log("[build] \(BuildStamp.text)")
-                DeviceDiagnostics.logStartup()
-                DockOffline.begin()
-                FrontendChoice.logStartup()
-                DeviceLoadDiagnostics.start()
-                // Madeira Dock: an unconsumed sign-in transfer from an earlier run goes.
-                if wine_process_is_running() == 0 { MadeiraDock.cleanup() }
-                // madeira-bcd: the Dock's Reset sets the VC++ markers back to a new prefix's
-                // values, read from the bundled prefix template (DockReset.swift).
-                DockReset.baselineProvider = { DockReset.templateRegistry { madeira_extract_prefix_tgz($0, $1) } }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: SteamSignIn.didChange)) { _ in
-                if !SteamSignIn.isSignedIn { MadeiraDock.cleanup() }
-            }
-            // A Home Screen shortcut (madeira://play?exe=...) starts its library entry,
-            // now or, from a cold start, once the library is up.
-            .onReceive(ShortcutRouter.shared.$pendingExe) { _ in launchPendingShortcut() }
-            .onChange(of: library.enabled) { _, _ in launchPendingShortcut() }
         }
+        // A second session cannot start in this process; offer to close Madeira.
+        .alert("Restart Madeira", isPresented: Binding(get: { library.restartNotice != nil },
+                                                        set: { if !$0 { library.restartNotice = nil } })) {
+            Button("Close Madeira") {
+                LogStore.shared.log("[session-once] closed by the user for a restart")
+                exit(0)
+            }
+            Button("Later", role: .cancel) { library.restartNotice = nil }
+        } message: { Text(library.restartNotice ?? "") }
+        // CS_DEBUGGED without a debugger (JIT enabled outside Madeira): offer Madeira's own request.
+        .alert("Enable JIT", isPresented: Binding(get: { library.jitNotice != nil },
+                                                  set: { if !$0 { library.jitNotice = nil } })) {
+            Button("Enable JIT") { library.jitNotice = nil; enableJIT() }
+            Button("Later", role: .cancel) { library.jitNotice = nil }
+        } message: { Text(library.jitNotice ?? "") }
+        .sheet(isPresented: $jitCoordinator.showSetup) { JITSetupView() }
+        // A Steam game's saves may not be the latest (cloudClear).
+        .alert(library.cloudNotice?.title ?? "Steam Cloud", isPresented: Binding(get: { library.cloudNotice != nil },
+                                                                                 set: { if !$0 { library.cloudNotice = nil } })) {
+            if let notice = library.cloudNotice {
+                switch notice.kind {
+                case .syncing: Button("Wait and sync") { library.cloudNotice = nil; cloudWait(notice.appID) }
+                case .unchecked: Button("Try again") { library.cloudNotice = nil; cloudWait(notice.appID) }
+                case .conflict:
+                    Button("Choose") {
+                        library.cloudNotice = nil; library.cloudRetry = nil
+                        library.showDetail = library.entries.first { $0.steamAppID == notice.appID }?.id
+                    }
+                }
+                Button("Launch anyway") {
+                    LogStore.shared.log("[steam-cloud] app=\(notice.appID) before-play: launched anyway")
+                    library.cloudNotice = nil; library.cloudBypass = notice.appID
+                    let retry = library.cloudRetry; library.cloudRetry = nil; retry?()
+                }
+                Button("Cancel", role: .cancel) { library.cloudNotice = nil; library.cloudRetry = nil }
+            }
+        } message: { Text(library.cloudNotice?.message ?? "") }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            library.refreshFlag()
+            if library.enabled && library.current == nil { MetalHostView.shared.isHidden = true }
+        }
+        .onAppear {
+            jit_install_trap_handler()
+            entitlements = EntitlementStatus.check()
+            logEntitlementStatus()
+            logStore.log("[build] \(BuildStamp.text)")
+            DeviceDiagnostics.logStartup()
+            DockOffline.begin()
+            FrontendChoice.logStartup()
+            DeviceLoadDiagnostics.start()
+            // Madeira Dock: an unconsumed sign-in transfer from an earlier run goes.
+            if wine_process_is_running() == 0 { MadeiraDock.cleanup() }
+            // madeira-bcd: the Dock's Reset sets the VC++ markers back to a new prefix's
+            // values, read from the bundled prefix template (DockReset.swift).
+            DockReset.baselineProvider = { DockReset.templateRegistry { madeira_extract_prefix_tgz($0, $1) } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: SteamSignIn.didChange)) { _ in
+            if !SteamSignIn.isSignedIn { MadeiraDock.cleanup() }
+        }
+        // A Home Screen shortcut (madeira://play?exe=...) starts its library entry,
+        // now or, from a cold start, once the library is up.
+        .onReceive(ShortcutRouter.shared.$pendingExe) { _ in launchPendingShortcut() }
+        .onChange(of: library.enabled) { _, _ in launchPendingShortcut() }
     }
 
     /// The developer interface. Orientation comes from the view's own shape, not
@@ -3884,7 +3870,7 @@ struct SetupGuideView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {   /* ml658: see the note on the main body */
+        NavigationStack {
             List {
                 Section("Requirements") {
                     guideRow(
