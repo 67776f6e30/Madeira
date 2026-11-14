@@ -15,7 +15,7 @@ enum SettingsPages {
     static var enabled: Bool { MadeiraConfig.flag("MADEIRA_SETTINGS_PAGES") }
 
     enum Page: Hashable, CaseIterable {
-        case steam, gog, itch, epic, ea, runtimes, graphics, display, memory, pointer, jit, signing, saves, drives,
+        case steam, gog, itch, epic, ea, googleDrive, runtimes, graphics, display, memory, pointer, jit, signing, saves, drives,
              appearance, advanced, credits
 
         var title: String {
@@ -25,6 +25,7 @@ enum SettingsPages {
             case .itch: return "itch.io"
             case .epic: return "Epic Games"
             case .ea: return "EA app"
+            case .googleDrive: return "Google Drive"
             case .runtimes: return "Runtimes"
             case .graphics: return "Graphics"
             case .display: return "Display"
@@ -47,6 +48,7 @@ enum SettingsPages {
             case .itch: return "arrow.down.app"
             case .epic: return "gamecontroller"
             case .ea: return "arrow.down.circle"
+            case .googleDrive: return "externaldrive.badge.icloud"
             case .runtimes: return "puzzlepiece.extension"
             case .graphics: return "cpu"
             case .display: return "display"
@@ -80,7 +82,7 @@ enum SettingsPages {
 
     /// The rows of the Settings tab, in groups.
     static let groups: [(String?, [Page])] = [
-        ("Getting games", [.steam, .gog, .itch, .epic, .ea, .runtimes]),
+        ("Getting games", [.steam, .gog, .itch, .epic, .ea, .googleDrive, .runtimes]),
         ("Running games", [.graphics, .display, .memory, .pointer]),
         ("Device", [.jit, .signing, .saves, .drives]),
         (nil, [.appearance, .advanced, .credits]),
@@ -168,6 +170,7 @@ struct SettingsPageView: View {
         case .itch: ItchSettingsSection()
         case .epic: EpicSettingsSection(open: { sheet = $0 })
         case .ea: EASettingsSection(open: { sheet = $0 })
+        case .googleDrive: DriveSettingsSection()
         case .runtimes:
             WineMonoSettingsSection()
             if VCRedistModel.enabled { VCRedistSettingsSection() }

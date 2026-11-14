@@ -72,7 +72,7 @@ enum LibraryGridFixed: Hashable {
 /// The store sections the original page shows after Other games and Steam (GOG, itch.io, Epic Games, EA app). On the grid each one is
 /// a fixed element hosting the store's own section, its cards laid out by the section as on the original page.
 enum LibraryGridStore: String, CaseIterable {
-    case gog, itch, epic, ea
+    case gog, itch, epic, ea, drive
 
     var tab: LibraryStoreTab {
         switch self {
@@ -80,6 +80,7 @@ enum LibraryGridStore: String, CaseIterable {
         case .itch: return .itch
         case .epic: return .epic
         case .ea: return .ea
+        case .drive: return .drive
         }
     }
 
@@ -89,6 +90,7 @@ enum LibraryGridStore: String, CaseIterable {
         case .itch: return ItchLibrary.enabled
         case .epic: return EpicLibrary.enabled
         case .ea: return EALibrary.enabled
+        case .drive: return true
         }
     }
 
@@ -101,6 +103,8 @@ enum LibraryGridStore: String, CaseIterable {
                 + "\(defaults.bool(forKey: hide)) \(defaults.object(forKey: shown) as? Bool ?? true)"
         }
         var result: [LibraryGridStore: String] = [:]
+        let drive = DriveDownloads.shared
+        result[.drive] = "\(drive.account != nil):\(drive.selection?.folder.id ?? ""):\(drive.jobs.count):\(drive.jobs.filter { $0.state == .ready }.count):\(search)"
         if GOGLibrary.enabled {
             let gog = GOGLibrary.shared, items = GOGGamesRules.items(gog, search: search)
             result[.gog] = signature(signedIn: gog.signedIn, refreshing: gog.refreshing, loaded: gog.libraryUpdated != nil,
@@ -231,7 +235,7 @@ struct LibraryGridPageModel: Equatable {
             } else if !tab.shows(.other) {
                 // Another store's tab: no games you added.
             } else if LibraryModel.shared.entries.filter({ $0.desktop != true && $0.listedInLibrary && $0.steamAppID == nil && $0.epicAppName == nil
-                                                            && $0.gogProductID == nil && $0.itchGameID == nil && $0.eaOfferID == nil }).isEmpty {
+                                                            && $0.gogProductID == nil && $0.itchGameID == nil && $0.eaOfferID == nil && $0.driveJobID == nil }).isEmpty {
                 page.append(.fixed(.emptyLibrary), spacing: LibraryGridGeometry.blockSpacing)
             } else {
                 page.grid("others", inputs.others, spacing: LibraryGridGeometry.blockSpacing)
@@ -501,6 +505,7 @@ struct LibraryGridPage: View {
     @ObservedObject private var steam = SteamOwnedLibrary.shared
     // The store sections' models and switches: what LibraryGridStore.signatures reads, so a change rebuilds the page.
     @ObservedObject private var gog = GOGLibrary.shared
+    @ObservedObject private var drive = DriveDownloads.shared
     @ObservedObject private var itch = ItchLibrary.shared
     @ObservedObject private var epic = EpicLibrary.shared
     @ObservedObject private var ea = EALibrary.shared
@@ -565,6 +570,7 @@ struct LibraryGridPage: View {
             .modifier(ItchSheets(open: open))
             .modifier(EpicSheets(open: open))
             .modifier(EASheets(open: open))
+            .modifier(DriveSheets(open: open))
             .alert("Steam", isPresented: Binding(get: { steam.error != nil }, set: { if !$0 { steam.error = nil } })) {
                 Button("OK", role: .cancel) { steam.error = nil }
             } message: { Text(steam.error ?? "") }
@@ -607,6 +613,8 @@ struct LibraryGridPage: View {
             return AnyView(ContentUnavailableView("Make yourself at home", systemImage: "gamecontroller", description: Text("Copy a game's folder into Madeira › wine › drive_c with the Files app, then tap + and choose its .exe.")))
         case .store(.gog, _):
             return AnyView(GOGGamesSection(search: search, layout: layout, width: width, open: open, inGrid: true))
+        case .store(.drive, _):
+            return AnyView(DriveGamesSection(search: search, open: open))
         case .store(.itch, _):
             return AnyView(ItchGamesSection(search: search, layout: layout, width: width, open: open, inGrid: true))
         case .store(.epic, _):
