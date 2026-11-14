@@ -1314,12 +1314,14 @@ struct ContentView: View {
         Group {
             if library.enabled && library.current != nil {
                 sessionBody
+                    .modifier(ClaimGamepadEvents())
             } else if library.enabled {
                 LibraryView(play: launchLibraryEntry, enableJIT: enableJIT,
                             startDock: { startDock($0, compactPool: $1) })
             } else {
                 NavigationStack {
                     developerBody
+                        .modifier(ClaimGamepadEvents())
                         .navigationTitle("Madeira")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbarBackground(.regularMaterial, for: .navigationBar)

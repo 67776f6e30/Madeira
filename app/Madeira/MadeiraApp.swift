@@ -32,7 +32,6 @@ struct MadeiraApp: App {
         WindowGroup {
             ContentView()
                 .background(InteractionFrameRateInstaller())   // touch frame-rate request (New library grid)
-                .modifier(ClaimGamepadEvents())
                 .onAppear {
                     ExternalDrives.shared.mountAll()
                     GamepadInput.shared.start()

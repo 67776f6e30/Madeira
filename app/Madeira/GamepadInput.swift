@@ -706,6 +706,9 @@ final class GamepadInput: @unchecked Sendable {
 }
 
 /// iOS 18 otherwise routes stick input into UIKit/SwiftUI focus navigation.
+/// Apply to page/game content inside navigation containers, never around the
+/// app's TabView. A root-level event interaction blocks touches on Duo's shared
+/// vertical bar, including its native tab and toolbar buttons.
 struct ClaimGamepadEvents: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *), GamepadInput.enabled {
