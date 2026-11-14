@@ -69,14 +69,17 @@ poll = library[library.index('    private func poll() {'):]
 poll = poll[:poll.index('\n    }\n')]
 require(poll.index('if dockStart.holding {') < poll.index('showGameView(reason: "surface")'),
         "while the hold is on, the desktop's first frame does not end the starting screen")
-row = library[library.index("The starting screen's controls are one row of glyph-only buttons"):]
+row = library[library.index("Secondary tools stay compact; recovery actions above have visible labels."):]
 row = row[:row.index('if model.launchSlow')]
 require('HStack(spacing: 14)' in row, 'one row of glyph buttons')
-order = [row.index('L("Close session"), "stop.circle"'), row.index('L("Hide live log") : L("Show live log"), "text.alignleft"'),
+order = [row.index('L("Hide live log") : L("Show live log"), "text.alignleft"'),
          row.index('L("Show desktop"), "macwindow"')]
-require(order == sorted(order), 'glyph order: close session, live log, show desktop')
-require('if dockStart.failure != nil {' in row and 'if dockStart.holding {' in row and 'dockStart.showDesktop(model)' in row,
-        'close session only once the Dock stopped; show desktop only while the desktop is held back')
+require(order == sorted(order), 'secondary glyph order: live log, show desktop')
+require('if dockStart.holding && !model.stoppingLaunch {' in row and 'dockStart.showDesktop(model)' in row,
+        'show desktop only while held back and not closing')
+require(library.count('launchRecovery(entry)') == 2 and 'Button { model.stopLaunch() }' in library
+        and 'ClaudeHelpButton(entry: entry)' in library,
+        'both starting-screen layouts offer cancellation, session recovery and Claude help')
 require('Text("Madeira Dock stopped")' in library and 'DockInstallers.note' in library and 'DockStartStatus.text(' in library,
         'the starting screen shows the Dock status, the one-time-install note, and a stop with its words')
 status = library[library.index('    private var dockStatus: String {'):]

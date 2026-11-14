@@ -80,8 +80,8 @@ check(project.count(f'/* {name} in Resources */') == 2 and project.count(f'/* {n
 check(project.count('/* ClaudeHelp.swift in Sources */') == 2 and project.count('/* ClaudeHelp.swift */') == 3,
       'ClaudeHelp.swift is compiled into the app')
 check('ClaudeHelp.install()' in main, 'the guide is copied into Documents when the app starts')
-check(library.count('ClaudeHelpButton(entry: entry)') == 1 and library.count('ClaudeHelpButton(entry: nil)') == 1,
-      'Game details (with the game) and Settings > Diagnostics (without one) offer Get Help from Claude')
+check(library.count('ClaudeHelpButton(entry: entry)') == 2 and library.count('ClaudeHelpButton(entry: nil)') == 1,
+      'Game details and launch recovery (with the game), plus Settings > Diagnostics, offer Get Help from Claude')
 pages = (app / 'SettingsPages.swift').read_text(encoding='utf-8')
 check(pages.count('ClaudeHelpButton(entry: nil)') == 1, 'the Advanced settings page offers Get Help from Claude under Diagnostics')
 check('GameProfile(windowsPath: entry.windowsPath).text' in helper and 'LibraryPrefs.sharedSwitches(entry.windowsPath)' in helper,

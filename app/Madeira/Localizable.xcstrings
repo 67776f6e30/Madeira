@@ -1,6 +1,56 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Cancel launch": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "실행 취소"
+          }
+        }
+      }
+    },
+    "Stop and return to library": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "중단하고 라이브러리로"
+          }
+        }
+      }
+    },
+    "Stopping session…": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "세션을 종료하는 중…"
+          }
+        }
+      }
+    },
+    "Returning to the library when the session closes…": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "세션이 종료되면 라이브러리로 돌아갑니다…"
+          }
+        }
+      }
+    },
+    "The session did not close. Close Madeira and open it again to return to the library.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "세션이 종료되지 않았습니다. Madeira를 닫고 다시 열면 라이브러리로 돌아갑니다."
+          }
+        }
+      }
+    },
     "%@ Workshop": {
       "localizations": {
         "de": {

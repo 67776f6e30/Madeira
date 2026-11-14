@@ -1030,6 +1030,9 @@ final class LibraryModel: ObservableObject {
     /// Quit game was asked for and the program is still running after `forceCloseAfter`
     /// seconds: a frozen program never handles Alt+F4, so the menu offers to close Madeira.
     @Published var forceCloseOffered = false
+    @Published private(set) var stoppingLaunch = false
+    private var nativeLaunchPending = false
+    private var launchCloseSent = false
     static let forceCloseAfter: TimeInterval = 10
     /// A Dock session whose game ended: Madeira Dock shut Valve's client down, and
     /// explorer's desktop is asked to close so the session returns to the library.
@@ -1665,6 +1668,11 @@ final class LibraryModel: ObservableObject {
     /// A Play still enabling JIT or getting its start ready: the starting screen is up
     /// for it before the session begins (LibraryHUD), so the press goes straight to it.
     @Published var preparing: LibraryEntry?
+    /// Invalidates delayed Play/JIT/sign-in completions when preparation is cancelled.
+    @Published private(set) var launchRequestID = UUID()
+    private var launchPreparations = 0
+    /// Retained after a failed session so its error can share the game's settings.
+    var helpEntry: LibraryEntry?
     private var preparingSince = Date()
     /// The starting screen is up: a session starting, or a Play getting ready.
     var startingScreen: Bool { launching || preparing != nil }
@@ -1672,16 +1680,24 @@ final class LibraryModel: ObservableObject {
     /// When the starting screen went up, for its elapsed-time line.
     var startingSince: Date { launching ? launchStarted : preparingSince }
     func prepare(_ entry: LibraryEntry) {
+        helpEntry = entry
         guard MadeiraConfig.flag("MADEIRA_LAUNCH_EARLY"), current == nil else { return }   // 0: Play keeps the Game details page up until the session begins
         preparingSince = Date(); preparing = entry
         // The starting screen draws in the controls window (LibraryHUD), which otherwise
         // only comes up with the session's game view.
         TouchControlsHost.attach()
         let id = entry.id
+        let requestID = launchRequestID
         // A start that neither begins nor reports an error lets the screen go.
         DispatchQueue.main.asyncAfter(deadline: .now() + 45) { [weak self] in
-            if let self, self.preparing?.id == id, self.current == nil { self.preparing = nil }
+            if let self, self.launchRequestID == requestID, !self.stoppingLaunch,
+               self.preparing?.id == id, self.current == nil { self.preparing = nil }
         }
+    }
+    func beginLaunchPreparation() { launchPreparations += 1 }
+    func endLaunchPreparation() {
+        launchPreparations -= 1
+        if stoppingLaunch && current == nil { poll() }
     }
     /// A Steam game's saves may not be the latest (SteamOwnedLibrary.cloudHold):
     /// the alert Play shows before starting it.
@@ -1707,7 +1723,9 @@ final class LibraryModel: ObservableObject {
         wine_exit_status_reset()
         JITPoolMeter.reset(); smallPoolNoted = false
         quitRequested = false
- quitRequestedAt = nil; forceCloseOffered = false; dockGameEnded = false; dockGameEndedAt = nil
+        quitRequestedAt = nil; forceCloseOffered = false; dockGameEnded = false; dockGameEndedAt = nil
+        stoppingLaunch = false; nativeLaunchPending = true; launchCloseSent = false
+        helpEntry = entry
         LibraryController.shared.configure(enabled: enabled, ownsInput: false)
         Self.sessionsThisRun += 1
         launchPresent = madeira_frame_count(); launchStarted = Date(); launchSlow = false; launchLogs = entry.liveLogs
@@ -1757,7 +1775,39 @@ final class LibraryModel: ObservableObject {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
     }
+    private func pollLaunchStop() -> Bool {
+        guard stoppingLaunch else { return false }
+        // A queued native launch can still start Wine even while both running flags
+        // are zero. Wait for its acknowledgement before returning to the library.
+        if current == nil {
+            if launchPreparations == 0 {
+                finishPreparationCancellation()
+                return true
+            }
+        } else if !nativeLaunchPending {
+            if wine_process_is_running() == 0 && wineserver_is_running() == 0 {
+                finish()
+                return true
+            }
+            if !launchCloseSent, wine_process_is_running() != 0 {
+                launchCloseSent = true
+                if DockStartScreen.shared.active || activeEntry?.desktop == true || activeEntry?.runsInDesktop == true {
+                    // Alt+F4 may target the dead Dock host or an installer. Close the
+                    // session's desktop explicitly, on its own Windows thread.
+                    winios_close_desktop()
+                } else {
+                    requestQuit()
+                }
+            }
+        }
+        if let asked = quitRequestedAt, Date().timeIntervalSince(asked) >= Self.forceCloseAfter {
+            forceCloseOffered = true
+        }
+        return true
+    }
+
     private func poll() {
+        if pollLaunchStop() { return }
         let dockStart = DockStartScreen.shared
         if dockStart.active {
             // A Dock start: the desktop's own frames (explorer, the host's console window)
@@ -1816,6 +1866,8 @@ final class LibraryModel: ObservableObject {
     /// offers Enable JIT instead of only reporting.
     func launchFailed(_ reason: String? = nil, offerJIT: Bool = false) {
         guard current != nil && !sawProcess else { return }
+        nativeLaunchPending = false
+        if stoppingLaunch { poll(); return }
         finish()
         if offerJIT, let reason { jitNotice = reason }
         else { error = reason ?? L("The session could not start. Check the diagnostic log and JIT status.") }
@@ -1824,6 +1876,7 @@ final class LibraryModel: ObservableObject {
     /// removal of a scrolling view with live content could leave the starting
     /// screen up (and unresponsive) while the game was already presenting.
     func showGameView(reason: String = "button") {
+        guard !stoppingLaunch else { return }
         if launching && !launchDismissLogged {
             launchDismissLogged = true
             fputs("[launch-view] dismissed reason=\(reason) logs=\(launchLogs ? 1 : 0)\n", stderr)
@@ -1871,6 +1924,51 @@ final class LibraryModel: ObservableObject {
         LibraryController.shared.configure(enabled: enabled, ownsInput: true)
         menu = true
     }
+    /// Cancel before Wine starts, or keep the starting screen visible until the
+    /// session actually ends. A timeout offers app closure on this same screen.
+    func stopLaunch() {
+        guard !stoppingLaunch else { return }
+        launchRequestID = UUID()
+        startingJIT = nil; cloudRetry = nil; cloudBypass = nil
+        LibraryKeyboard.hide()
+        if current == nil && launchPreparations == 0 {
+            finishPreparationCancellation()
+            return
+        }
+        stoppingLaunch = true
+        quitRequested = true; quitRequestedAt = Date()
+        forceCloseOffered = false; menu = false
+        if current == nil {
+            // Sign-in preparation may still own Steam's connection or EA's local
+            // service. Let it unwind before another Play can reuse those resources.
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
+        }
+        LogStore.shared.log("[frontend] launch stop requested")
+        poll()
+    }
+
+    private func finishPreparationCancellation() {
+        timer?.invalidate(); timer = nil
+        preparing = nil; stoppingLaunch = false; forceCloseOffered = false; quitRequestedAt = nil
+        launchLogs = false
+        LogStore.shared.setDisplayActive(true)
+        MainActor.assumeIsolated { LaunchCurtain.shared.cancel() }
+        LogStore.shared.log("[frontend] launch preparation cancelled")
+    }
+
+    /// Called after the background launch either starts Wine or acknowledges
+    /// cancellation. No worker can start Wine after a cancelled session returns.
+    func nativeLaunchSettled() {
+        nativeLaunchPending = false
+        if stoppingLaunch { poll() }
+    }
+
+    func closeMadeira() {
+        LogStore.shared.log("[frontend] force close: the session did not end; closing Madeira", level: .error)
+        exit(0)
+    }
+
     func requestQuit() {
         LibraryKeyboard.hide()
         quitRequested = true
@@ -1922,10 +2020,15 @@ final class LibraryModel: ObservableObject {
         if ControlPresetsModel.enabled { controls.layoutID = savedLayout }
         current = nil; activeEntry = nil; menu = false; sessionMessage = ""
         quitRequestedAt = nil; forceCloseOffered = false; dockGameEnded = false; dockGameEndedAt = nil
+        stoppingLaunch = false; nativeLaunchPending = false; launchCloseSent = false
         displayMode = .fit
         LogStore.shared.setDisplayActive(true)
         launching = false; launchLogs = false; LibraryKeyboard.hide()
         DockStartScreen.shared.finish()
+        MainActor.assumeIsolated {
+            MadeiraDock.cleanup()
+            SteamOwnedLibrary.shared.dockEnded()
+        }
         LibraryController.shared.configure(enabled: enabled, ownsInput: enabled)
         MetalHostView.shared.isHidden = true
         ProMotionIntent.shared.setActive(false)
@@ -3119,6 +3222,7 @@ struct LibraryView: View {
     }
     @State private var browser = false
     @State private var selected: LibraryEntry?
+    @State private var errorHelpFiles: ClaudeHelpFiles?
     @State private var search = ""
     /// The Settings tab's own search text, kept apart from the library's.
     @State private var settingsSearch = ""
@@ -3210,8 +3314,15 @@ struct LibraryView: View {
         .alert(jitProblem == nil ? L("Library") : L("Couldn't Enable JIT"),
                isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             if let jitProblem { jitConnectionActions(jitProblem, retry: enableJIT) { model.error = nil } }
+            Button("Get Help from Claude") {
+                let files = ClaudeHelpFiles(urls: ClaudeHelp.files(for: model.helpEntry))
+                model.error = nil
+                // Let the alert dismiss before presenting the system share sheet.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { errorHelpFiles = files }
+            }
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .sheet(item: $errorHelpFiles) { ActivitySheet(items: $0.urls) }
         // Signing that runs out: the refresh, and the offer when it could not run (SigningRefresh.swift).
         .modifier(SigningRefreshOffer())
         // A setup opened from Files, a chat or a madeira://setup link (GameSetupShare.swift).
@@ -3676,6 +3787,7 @@ private struct LibrarySheets: ViewModifier {
                 })
             }
             .onChange(of: model.current) { _, current in if current != nil { selected = nil } }
+            .onChange(of: model.launchRequestID) { _, _ in selected = nil }
             .onChange(of: model.error) { _, error in if error != nil { selected = nil } }
             .onChange(of: model.restartNotice) { _, notice in if notice != nil { selected = nil } }
             .onChange(of: model.jitNotice) { _, notice in if notice != nil { selected = nil } }
@@ -3879,9 +3991,11 @@ struct LibraryDetail: View {
             SteamGamesRules.artwork(appID: id) { SteamOwnedLibrary.shared.game($0) }.first
         })
         model.prepare(entry)
+        let requestID = model.launchRequestID
         let profile = entry
         // Give the pressed state a display turn before saving and handing off.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            guard model.launchRequestID == requestID else { return }
             model.save(profile); play(profile)
         }
     }
@@ -5509,7 +5623,9 @@ struct LibraryHUD: View {
                 if dockStart.failure == nil {
                     ProgressView().tint(.white).modifier(LaunchEntrance(visible: launchVisible, step: 2, still: curtained))
                 }
-                if let failure = dockStart.failure {
+                if model.stoppingLaunch {
+                    Text("Stopping session…").font(.headline)
+                } else if let failure = dockStart.failure {
                     Text("Madeira Dock stopped").font(.headline)
                     Text(failure).font(.caption).multilineTextAlignment(.center).frame(maxWidth: 360)
                 } else if dockStart.active {
@@ -5536,23 +5652,18 @@ struct LibraryHUD: View {
                         }
                     }.modifier(LaunchEntrance(visible: launchVisible, step: 2, still: curtained))
                 }
-                // The starting screen's controls are one row of glyph-only buttons, so a
-                // short screen does not push them below the fold. The words stay as
-                // VoiceOver labels. A stopped Dock start can be closed; while a Dock start
-                // holds the desktop back, Show desktop reveals it.
+                launchRecovery(entry)
+                // Secondary tools stay compact; recovery actions above have visible labels.
                 HStack(spacing: 14) {
-                    if dockStart.failure != nil {
-                        launchGlyph(L("Close session"), "stop.circle") { model.requestQuit() }
-                    }
                     launchGlyph(showLogs ? L("Hide live log") : L("Show live log"), "text.alignleft", on: showLogs) {
                         model.toggleLaunchLogs()
                     }
-                    if dockStart.holding {
+                    if dockStart.holding && !model.stoppingLaunch {
                         launchGlyph(L("Show desktop"), "macwindow") { dockStart.showDesktop(model) }
                             .accessibilityHint(L("Shows the Windows desktop"))
                     }
                 }.modifier(LaunchEntrance(visible: launchVisible, step: 3, still: curtained))
-                if model.launchSlow && !dockStart.holding {
+                if model.launchSlow && !dockStart.holding && !model.stoppingLaunch {
                     Button("Show game view") { model.showGameView(reason: "button") }.frame(minHeight: 44)
                 }
                 if showLogs && !sideLogs {
@@ -5570,8 +5681,8 @@ struct LibraryHUD: View {
         .padding(.top, geo.safeAreaInsets.top).foregroundStyle(.white).transition(.opacity)
     }
     /// The landscape starting screen: a large cover left of centre, and beside it the
-    /// title, what the start is doing in smaller type, and the same glyph row as the
-    /// column (close session, live log, show desktop). The live log opens under the row.
+    /// title, status, recovery actions and secondary tools. Scroll the controls on
+    /// short screens so Close Madeira and help never fall below an unreachable edge.
     private func launchWideView(_ entry: LibraryEntry, geometry geo: GeometryProxy) -> some View {
         let available = max(0, geo.size.height - geo.safeAreaInsets.top - geo.safeAreaInsets.bottom)
         let showLogs = model.launchLogs
@@ -5586,38 +5697,38 @@ struct LibraryHUD: View {
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { coverFrame = $0; LaunchCurtain.shared.track($0) }
                 .opacity(coverLanded ? 1 : 0)
                 .modifier(LaunchEntrance(visible: launchVisible, step: 0, rise: CGSize(width: -36, height: 0), scale: 0.86, still: curtained))
-            VStack(alignment: .leading, spacing: short ? 10 : 14) {
-                Text(entry.title).font(.system(size: short ? 28 : 38, weight: .bold))
-                    .lineLimit(2).minimumScaleFactor(0.6)
-                    .modifier(LaunchEntrance(visible: launchVisible, step: 1, rise: CGSize(width: 22, height: 0), still: curtained))
-                launchWideStatus.modifier(LaunchEntrance(visible: launchVisible, step: 2, rise: CGSize(width: 22, height: 0), still: curtained))
-                HStack(spacing: 12) {
-                    if dockStart.failure != nil {
-                        launchGlyph(L("Close session"), "stop.circle") { model.requestQuit() }
+            ScrollView {
+                VStack(alignment: .leading, spacing: short ? 10 : 14) {
+                    Text(entry.title).font(.system(size: short ? 28 : 38, weight: .bold))
+                        .lineLimit(2).minimumScaleFactor(0.6)
+                        .modifier(LaunchEntrance(visible: launchVisible, step: 1, rise: CGSize(width: 22, height: 0), still: curtained))
+                    launchWideStatus.modifier(LaunchEntrance(visible: launchVisible, step: 2, rise: CGSize(width: 22, height: 0), still: curtained))
+                    launchRecovery(entry)
+                    HStack(spacing: 12) {
+                        launchGlyph(showLogs ? L("Hide live log") : L("Show live log"), "text.alignleft", on: showLogs) {
+                            model.toggleLaunchLogs()
+                        }
+                        if dockStart.holding && !model.stoppingLaunch {
+                            launchGlyph(L("Show desktop"), "macwindow") { dockStart.showDesktop(model) }
+                                .accessibilityHint(L("Shows the Windows desktop"))
+                        }
+                        if model.launchSlow && !dockStart.holding && !model.stoppingLaunch {
+                            Button("Show game view") { model.showGameView(reason: "button") }
+                                .font(.subheadline.weight(.semibold)).buttonStyle(.bordered).tint(.white)
+                                .buttonBorderShape(.capsule).frame(minHeight: 44)
+                        }
                     }
-                    launchGlyph(showLogs ? L("Hide live log") : L("Show live log"), "text.alignleft", on: showLogs) {
-                        model.toggleLaunchLogs()
-                    }
-                    if dockStart.holding {
-                        launchGlyph(L("Show desktop"), "macwindow") { dockStart.showDesktop(model) }
-                            .accessibilityHint(L("Shows the Windows desktop"))
-                    }
-                    if model.launchSlow && !dockStart.holding {
-                        Button("Show game view") { model.showGameView(reason: "button") }
-                            .font(.subheadline.weight(.semibold)).buttonStyle(.bordered).tint(.white)
-                            .buttonBorderShape(.capsule).frame(minHeight: 44)
+                    .padding(.top, short ? 2 : 6)
+                    .modifier(LaunchEntrance(visible: launchVisible, step: 3, rise: CGSize(width: 22, height: 0), still: curtained))
+                    if showLogs {
+                        LibraryLiveLogs().frame(height: min(170, available * 0.3)).frame(maxWidth: 520)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
-                .padding(.top, short ? 2 : 6)
-                .modifier(LaunchEntrance(visible: launchVisible, step: 3, rise: CGSize(width: 22, height: 0), still: curtained))
-                if showLogs {
-                    LibraryLiveLogs().frame(height: min(170, available * 0.3)).frame(maxWidth: 520)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-            }
-            .frame(maxWidth: 520, alignment: .leading)
-            .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.86), value: showLogs)
+                .frame(maxWidth: 520, minHeight: max(0, available - 32), alignment: .leading)
+                .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.86), value: showLogs)
+            }.frame(maxWidth: 520, maxHeight: max(0, available - 32))
             Spacer(minLength: 0)
         }
         .padding(.leading, leading).padding(.trailing, geo.safeAreaInsets.trailing + 24)
@@ -5627,7 +5738,9 @@ struct LibraryHUD: View {
     /// The landscape status: a small spinner and one line of what the start is doing,
     /// the one-time-install note and the elapsed time under it; or why the Dock stopped.
     @ViewBuilder private var launchWideStatus: some View {
-        if let failure = dockStart.failure {
+        if model.stoppingLaunch {
+            Text("Stopping session…").font(.headline)
+        } else if let failure = dockStart.failure {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Madeira Dock stopped").font(.headline)
                 Text(failure).font(.subheadline).foregroundStyle(.white.opacity(0.75)).frame(maxWidth: 440, alignment: .leading)
@@ -5650,6 +5763,32 @@ struct LibraryHUD: View {
             }
         }
     }
+    /// Always available during loading and after failure, in either orientation.
+    private func launchRecovery(_ entry: LibraryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.forceCloseOffered {
+                Text("The session did not close. Close Madeira and open it again to return to the library.")
+                    .font(.caption).foregroundStyle(.white.opacity(0.8))
+                Button(role: .destructive) { model.closeMadeira() } label: {
+                    Label("Close Madeira", systemImage: "xmark.octagon").frame(minHeight: 32)
+                }.tint(.red)
+            } else {
+                Button { model.stopLaunch() } label: {
+                    Label(model.current == nil ? L("Cancel launch") : L("Stop and return to library"),
+                          systemImage: "arrow.backward").frame(minHeight: 32)
+                }.disabled(model.stoppingLaunch)
+                if model.stoppingLaunch {
+                    Text("Returning to the library when the session closes…")
+                        .font(.caption).foregroundStyle(.white.opacity(0.8))
+                }
+            }
+            if dockStart.failure != nil || model.forceCloseOffered {
+                ClaudeHelpButton(entry: entry).frame(minHeight: 44)
+            }
+        }
+        .font(.subheadline.weight(.semibold)).buttonStyle(.bordered).tint(.white)
+    }
+
     /// A round glyph button for the starting screen's control row.
     private func launchGlyph(_ label: String, _ symbol: String, on: Bool = false,
                              action: @escaping () -> Void) -> some View {
@@ -6714,6 +6853,11 @@ private struct LaunchFloodShape: Shape {
             UIView.animate(withDuration: 0.32, delay: 0, options: [.curveEaseInOut]) { self?.window?.alpha = 0 }
                 completion: { _ in self?.close() }
         }
+    }
+
+    func cancel() {
+        gather?.stopAnimation(true)
+        close()
     }
 
     private func retract() {

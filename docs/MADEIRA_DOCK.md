@@ -254,10 +254,20 @@ windows and the host's console window, seconds before the game. The user saw
 the Wine desktop instead of the game. Now (`DockStartScreen.swift`) the
 starting screen of a Dock start shows the game's Steam cover and background
 art (public store artwork by App ID), its title, a spinner, a status line
-with the seconds so far, and one row of round glyph buttons (their words are
-VoiceOver labels): **Close session** once Dock has stopped, **Show live log**,
-and **Show desktop** while the desktop is held back. It stays until the
-game's own window is shown.
+with the seconds so far. **Stop and return to library** is available during
+loading as well as after failure. It asks the session's Windows desktop to
+close and returns only after Wine and its server have ended. If that takes
+10 seconds, **Close Madeira** appears on the same screen. Before a native
+session starts, **Cancel launch** cancels the pending Play, including its
+JIT, sign-in and cloud-wait continuations. Another game still requires an
+app restart once a Wine session has run.
+
+Failures also offer **Get Help from Claude**, using the existing system share
+sheet with the guide, logs and the game's settings. No files are sent until
+the user chooses a share destination. **Show live log** and **Show desktop**
+remain secondary round glyph buttons; desktop reveal is disabled while the
+session is closing. Both portrait and landscape layouts keep the recovery
+actions reachable by scrolling on short screens.
 
 The status line follows the furthest stage in the host's report
 (`DockStartStatus`, read once a second):
@@ -589,6 +599,11 @@ credentials:
   ASan/UBSan and ThreadSanitizer (top-level windows only, one path lookup per
   process, frames and swapchains, capacity, the born-minimized restore and its
   switch), the driver's path form, and the wiring and glyph row.
+- `check-launch-recovery.py`: the production cancellation and close methods
+  compiled with stubbed native boundaries: pending sign-in cleanup, cancellation
+  before Wine starts, desktop versus direct-game closure, the ten-second fallback,
+  and returning only after both Wine and its server stop. Also checks the async
+  cancellation guards, both screen layouts, Claude help and Korean labels.
 
 ## Launch arguments and ownership timing
 

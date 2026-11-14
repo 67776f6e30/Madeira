@@ -1284,6 +1284,7 @@ struct ContentView: View {
     @State private var jitStatus: JITStatus = .unknown
     /// Play without JIT: the start that waits for Enable JIT (jitReadyForLaunch).
     @State private var launchAfterJIT: (() -> Void)?
+    @State private var launchAfterJITRequestID: UUID?
     @State private var entitlements: EntitlementStatus?
     @State private var debuggerAttached = isDebuggerAttached()
     @ObservedObject private var input = InputSettings.shared
@@ -2435,7 +2436,10 @@ struct ContentView: View {
     /// started meanwhile. A failure drops it: a later Enable JIT starts no game.
     private func launchAfterJITEnded(started: Bool) {
         guard let launch = launchAfterJIT else { return }
+        let requestID = launchAfterJITRequestID
         launchAfterJIT = nil
+        launchAfterJITRequestID = nil
+        guard requestID == library.launchRequestID else { return }
         library.startingJIT = nil
         guard started, StikJITHelper.ready, library.current == nil, wine_process_is_running() == 0 else {
             logStore.log("[jit-on-play] JIT did not come on: the game was not started")
@@ -2457,6 +2461,8 @@ struct ContentView: View {
         if StikJITHelper.ready { return true }
         if inLibrary, let launch {
             logStore.log("[jit-on-play] JIT is not on: enabling it, then starting the game")
+            let requestID = library.launchRequestID
+            launchAfterJITRequestID = requestID
             launchAfterJIT = launch
             library.startingJIT = entry
             if jitStatus != .testing { enableJIT() }   // a second Play while it runs only replaces the game
@@ -2506,9 +2512,14 @@ struct ContentView: View {
     /// Syncs the game's saves, then starts it; if the saves are still not settled, asks again.
     private func cloudWait(_ appID: Int) {
         guard SteamOwnedLibrary.shared.cloudWaitingFor == nil else { return }
+        let requestID = library.launchRequestID
         let name = MadeiraDock.games(drive: MadeiraDock.drive).first { $0.id == appID }?.name ?? "This game"
+        library.beginLaunchPreparation()
         Task { @MainActor in
+            defer { library.endLaunchPreparation() }
+            guard library.launchRequestID == requestID else { return }
             let hold = await SteamOwnedLibrary.shared.settleCloud(appID)
+            guard library.launchRequestID == requestID else { return }
             if let hold {
                 library.cloudNotice = cloudNotice(appID, name: name, hold: hold)
             } else {
@@ -2551,6 +2562,8 @@ struct ContentView: View {
     /// applies the entry's launch profile and runs the same full sequence as the
     /// developer interface's buttons.
     private func launchLibraryEntry(_ entry: LibraryEntry) {
+        guard !library.stoppingLaunch else { return }
+        library.helpEntry = entry
         // madeira-bcd: a game seen for the first time starts with Madeira's recommended
         // settings (GameRecommendationsApply.swift).
         var entry = entry
@@ -2599,17 +2612,26 @@ struct ContentView: View {
     /// licence, the EA app's environment and Madeira's stand-in for the EA app's local
     /// service (EALibrary.prepareLaunch); every other launch starts without that environment.
     private func startLibraryEntry(_ entry: LibraryEntry, epicReady: Bool = false, eaReady: Bool = false) {
+        let requestID = library.launchRequestID
         guard !EpicCloud.shared.isBusy else {
             library.error = "Wait for Epic Cloud save sync to finish before starting a game."
             return
         }
         if entry.eaOfferID == nil { EALibrary.clearEnvironment() }
         if let offer = entry.eaOfferID, !eaReady {
+            library.beginLaunchPreparation()
             Task { @MainActor in
+                defer { library.endLaunchPreparation() }
+                guard library.launchRequestID == requestID else { return }
                 do {
                     try await EALibrary.shared.prepareLaunch(entry)
+                    guard library.launchRequestID == requestID else {
+                        EALibrary.shared.reconcileSession()
+                        return
+                    }
                     startLibraryEntry(entry, epicReady: epicReady, eaReady: true)
                 } catch {
+                    guard library.launchRequestID == requestID else { return }
                     LogStore.shared.log("[ea-launch] offer=\(offer) not started: \(error.localizedDescription)", level: .error)
                     library.error = "This EA game could not be prepared: \(error.localizedDescription)"
                 }
@@ -2617,12 +2639,17 @@ struct ContentView: View {
             return
         }
         if let app = entry.epicAppName, !epicReady {
+            library.beginLaunchPreparation()
             Task { @MainActor in
+                defer { library.endLaunchPreparation() }
+                guard library.launchRequestID == requestID else { return }
                 do {
                     let arguments = try await EpicLibrary.shared.launchArguments(appName: app)
+                    guard library.launchRequestID == requestID else { return }
                     LibraryEntry.setTransientArguments(arguments, for: entry.id)
                     startLibraryEntry(entry, epicReady: true)
                 } catch {
+                    guard library.launchRequestID == requestID else { return }
                     LogStore.shared.log("[epic-launch] app=\(app) not started: no sign-in arguments", level: .error)
                     library.error = "This Epic game could not get its sign-in from Epic: \(error.localizedDescription)"
                 }
@@ -2722,7 +2749,7 @@ struct ContentView: View {
     private func runWineFullSequence(profile: LibraryEntry? = nil) {
         guard jit_check_debugged() else {
             logStore.log("JIT not enabled. Press 'Enable JIT' first.", level: .error)
-            if profile != nil { LibraryModel.shared.launchFailed() }
+            if library.current != nil { library.launchFailed() }
             return
         }
         // Steam downloads wait for the session, and the app's own Steam connection closes
@@ -2765,7 +2792,22 @@ struct ContentView: View {
         // contention that blocks the main thread RunLoop, triggering iOS hang detection
         ws_log_quiet = 1
 
+        let sessionID = library.current
         DispatchQueue.global(qos: .userInitiated).async {
+            // Check cancellation between blocking startup stages. The main thread
+            // keeps the recovery screen and its timeout usable while a stage runs.
+            func cancelBeforeWine() -> Bool {
+                guard sessionID != nil, DispatchQueue.main.sync(execute: {
+                    library.current == sessionID && library.stoppingLaunch
+                }) else { return false }
+                if wineserver_is_running() != 0 { wineserver_stop() }
+                DispatchQueue.main.async {
+                    heartbeat.invalidate(); ws_log_quiet = 0; logStore.uiPaused = false
+                    library.nativeLaunchSettled()
+                }
+                return true
+            }
+            if cancelBeforeWine() { return }
             // A library entry's launch profile (executable, arguments, x87
             // precision, frame limit).
             if let profile {
@@ -3320,12 +3362,16 @@ struct ContentView: View {
                 // the lines above this one in the log carry the detail.
                 let reason = StikJITHelper.poolFailure
                 logStore.log("  " + (reason ?? "No reason was recorded; see the pool lines above."), level: .info)
-                logStore.uiPaused = false
                 // A library session that never started returns to the library.
                 let offerJIT = reason == StikJITHelper.noDebuggerMessage
-                DispatchQueue.main.async { LibraryModel.shared.launchFailed(reason, offerJIT: offerJIT) }
+                DispatchQueue.main.async {
+                    heartbeat.invalidate(); ws_log_quiet = 0; logStore.uiPaused = false
+                    LibraryModel.shared.launchFailed(reason, offerJIT: offerJIT)
+                }
                 return
             }
+
+            if cancelBeforeWine() { return }
 
             // Step 1b (ml524, #67): DETACH THE DEBUGGER NOW, while the VM map is small.
             //
@@ -3374,6 +3420,7 @@ struct ContentView: View {
             JITNetworkShortcut.restoreBlocking()
 
             // Step 2: Start wineserver
+            if cancelBeforeWine() { return }
             self.startWineserver()
             winios_phase("wineserver-up")
 
@@ -3392,7 +3439,9 @@ struct ContentView: View {
                 Thread.sleep(forTimeInterval: 2.0)
             }
             winios_phase("wine-start")
+            if cancelBeforeWine() { return }
             self.startWineProcess()
+            DispatchQueue.main.async { library.nativeLaunchSettled() }
 
             // Step 4: Wait for Wine to finish instead of fixed timer
             // Poll wine_process_is_running() — it clears when __wine_main returns
@@ -3489,7 +3538,10 @@ struct ContentView: View {
     /// `profile` is a Steam game's library entry (its Game details page): the
     /// session then takes that entry's display, performance and on-screen settings.
     private func startDock(_ game: DockGame, compactPool: Bool, profile: LibraryEntry? = nil) {
+        guard !library.stoppingLaunch else { return }
         let inLibrary = library.enabled
+        let requestID = library.launchRequestID
+        if inLibrary { library.helpEntry = profile ?? .dockSession(title: game.name, width: 1280, height: 720) }
         guard jitReadyForLaunch(inLibrary: inLibrary, entry: profile?.id,
                                 then: { startDock(game, compactPool: compactPool, profile: profile) }) else { return }
         guard cloudClear(game.id, name: game.name, retry: { startDock(game, compactPool: compactPool, profile: profile) }) else { return }
@@ -3519,13 +3571,17 @@ struct ContentView: View {
         // (library, playtime, downloads) logs off and its socket closes before the sign-in
         // is handed to Valve's client, and it stays off until the Dock session has ended
         // (SteamOwnedLibrary.prepareDock / dockEnded, SteamConnectionGate).
+        if inLibrary { library.beginLaunchPreparation() }
         Task { @MainActor in
+            defer { if inLibrary { library.endLaunchPreparation() } }
+            guard !inLibrary || library.launchRequestID == requestID else { return }
             // Resolve the original config.launch key before closing the native connection.
             // A filtered launch array can start at 1 (or have gaps); its offset is not the key.
             // Without a choice (no configuration to be had, or no entry whose .exe is on disk:
             // a launcher started through a .bat, say) it is key 0, which every Dock start
             // used before; Dock stops at once if Steam names that entry missing.
             let options = await SteamOwnedLibrary.shared.launchOptions(appID: game.id)
+            guard !inLibrary || library.launchRequestID == requestID else { return }
             let installFolder = MadeiraDock.drive.appendingPathComponent(game.library + "/common/" + game.installDir)
             let steamEntry = options.flatMap { SteamDirectStart.choose($0, installFolder: installFolder) }
             let chosen = steamEntry?.launchIndex
@@ -3541,6 +3597,10 @@ struct ContentView: View {
             let launchOption = chosen ?? 0
             LogStore.shared.log("[madeira-dock] launch option \(launchOption)\(chosen == nil ? " (none chosen: the default)" : "")")
             await SteamOwnedLibrary.shared.prepareDock()
+            guard !inLibrary || library.launchRequestID == requestID else {
+                SteamOwnedLibrary.shared.dockEnded()
+                return
+            }
             do {
                 // The launch state may have changed while the connection closed.
                 guard StikJITHelper.ready, wine_process_is_running() == 0, wineserver_is_running() == 0,
