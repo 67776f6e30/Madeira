@@ -34,6 +34,7 @@ jobs:
           python3 tests/host/check-ci-llvm-cache.py
           python3 tests/host/check-clean-bootstrap.py
           python3 tests/host/check-app-link-inputs.py
+          python3 tests/host/check-app-scene-manifest.py
           python3 tests/host/check-runtime-components.py
       - name: Check touch control layouts and editor
         run: python3 tests/host/check-control-presets.py
@@ -72,6 +73,7 @@ jobs:
           test -s dist/Madeira.ipa
           unzip -tq dist/Madeira.ipa
           python3 tools/build/runtime-components.py ipa dist/Madeira.ipa
+          python3 tests/host/check-app-scene-manifest.py --ipa dist/Madeira.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: Madeira-ipa
@@ -395,6 +397,8 @@ jobs:
           merge-multiple: true
       - name: Build IPA
         run: tools/build-ipa.sh
+      - name: Validate app scene lifecycle
+        run: python3 tests/host/check-app-scene-manifest.py --ipa dist/Madeira.ipa
       - uses: actions/cache/save@v4
         with:
           key: ${{ needs.plan.outputs.ipa }}
