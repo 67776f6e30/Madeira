@@ -323,8 +323,6 @@ struct LibraryEntry: Codable, Identifiable {
     /// licence, the EA app's environment and Madeira's stand-in for the EA app's
     /// local service (EALibrary.prepareLaunch).
     var eaOfferID: String?
-    /// Local installation downloaded from the user's Google Drive.
-    var driveJobID: UUID?
     /// An Epic game with an official way to start without anti-cheat
     /// (epicAntiCheatOffProgram): nil or true starts that program.
     /// The anti-cheat cannot run in Wine on iOS, so on is the default.
@@ -1169,8 +1167,7 @@ final class LibraryModel: ObservableObject {
             next.firstIndex(where: { entry.gogProductID != nil && $0.gogProductID == entry.gogProductID }) ??
             next.firstIndex(where: { entry.itchGameID != nil && $0.itchGameID == entry.itchGameID }) ??
             next.firstIndex(where: { entry.epicAppName != nil && $0.epicAppName == entry.epicAppName }) ??
-            next.firstIndex(where: { entry.eaOfferID != nil && $0.eaOfferID == entry.eaOfferID }) ??
-            next.firstIndex(where: { entry.driveJobID != nil && $0.driveJobID == entry.driveJobID }) {
+            next.firstIndex(where: { entry.eaOfferID != nil && $0.eaOfferID == entry.eaOfferID }) {
             // A details sheet may predate an asynchronous metadata refresh.
             if (next[i].metadataChecked ?? .distantPast) > (entry.metadataChecked ?? .distantPast) {
                 entry.folderBytes = next[i].folderBytes; entry.graphicsAPI = next[i].graphicsAPI
@@ -2958,7 +2955,7 @@ struct LibrarySectionHeader<Trailing: View>: View {
 /// Games, EA app) or All of them. Only the sections the page would show get a tab, and with
 /// fewer than two there are none. env.MADEIRA_LIBRARY_TABS = 0: no tabs, every section on one page.
 enum LibraryStoreTab: String, CaseIterable, Identifiable {
-    case all, steam, other, gog, itch, epic, ea, drive
+    case all, steam, other, gog, itch, epic, ea
     var id: String { rawValue }
     static let key = "madeiraLibraryStoreTab"
     static var enabled: Bool { MadeiraConfig.flag("MADEIRA_LIBRARY_TABS") }
@@ -2973,7 +2970,6 @@ enum LibraryStoreTab: String, CaseIterable, Identifiable {
         case .itch: return "itch.io"
         case .epic: return "Epic"
         case .ea: return "EA"
-        case .drive: return "Drive"
         }
     }
 
@@ -2988,7 +2984,6 @@ enum LibraryStoreTab: String, CaseIterable, Identifiable {
         if ItchLibrary.enabled { tabs.append(.itch) }
         if EpicLibrary.enabled { tabs.append(.epic) }
         if EALibrary.enabled { tabs.append(.ea) }
-        tabs.append(.drive)
         return tabs.count < 2 ? [] : [.all] + tabs
     }
 
@@ -3356,7 +3351,7 @@ struct LibraryView: View {
     @ObservedObject private var steamLibrary = SteamOwnedLibrary.shared
     private var entries: [LibraryEntry] {
         // Steam games are listed in their own section (SteamGames.swift).
-        let visible = model.entries.filter { $0.desktop != true && $0.listedInLibrary && $0.steamAppID == nil && $0.epicAppName == nil && $0.gogProductID == nil && $0.itchGameID == nil && $0.eaOfferID == nil && $0.driveJobID == nil && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)) }
+        let visible = model.entries.filter { $0.desktop != true && $0.listedInLibrary && $0.steamAppID == nil && $0.epicAppName == nil && $0.gogProductID == nil && $0.itchGameID == nil && $0.eaOfferID == nil && (search.isEmpty || $0.title.localizedCaseInsensitiveContains(search)) }
         if sort == "added" { return visible.reversed() }
         return visible.sorted {
             if sort == "played", $0.lastPlayed != $1.lastPlayed { return ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
@@ -3555,7 +3550,6 @@ struct LibraryView: View {
                 GOGSettingsSection(open: { settingsSheet = $0 })
             }
             if ItchLibrary.enabled, settingsShow("itch.io", "itch", "API key", "sign in", "account") { ItchSettingsSection() }
-            if settingsShow("Google", "Drive", "download", "folder", "account") { DriveSettingsSection() }
             if EpicLibrary.enabled, settingsShow("Epic", "Epic Games", "sign in", "account") {
                 EpicSettingsSection(open: { settingsSheet = $0 })
             }
@@ -3675,7 +3669,7 @@ struct LibraryView: View {
                     }
                 } else if !tab.shows(.other) {
                     EmptyView()
-                } else if model.entries.filter({ $0.desktop != true && $0.listedInLibrary && $0.steamAppID == nil && $0.epicAppName == nil && $0.gogProductID == nil && $0.itchGameID == nil && $0.eaOfferID == nil && $0.driveJobID == nil }).isEmpty {
+                } else if model.entries.filter({ $0.desktop != true && $0.listedInLibrary && $0.steamAppID == nil && $0.epicAppName == nil && $0.gogProductID == nil && $0.itchGameID == nil && $0.eaOfferID == nil }).isEmpty {
                     ContentUnavailableView("Make yourself at home", systemImage: "gamecontroller", description: Text("Copy a game's folder into Madeira › wine › drive_c with the Files app, then tap + and choose its .exe."))
                 } else {
                     cells(entries, width: viewport.size.width)
@@ -3685,7 +3679,6 @@ struct LibraryView: View {
                 if GOGLibrary.enabled && tab.shows(.gog) {
                     GOGGamesSection(search: search, layout: layout, width: viewport.size.width, open: { selected = $0 })
                 }
-                if tab.shows(.drive) { DriveGamesSection(search: search, open: { selected = $0 }) }
                 // The account's itch.io games (ItchGames.swift), the same way.
                 if ItchLibrary.enabled && tab.shows(.itch) {
                     ItchGamesSection(search: search, layout: layout, width: viewport.size.width, open: { selected = $0 })
@@ -3707,7 +3700,6 @@ struct LibraryView: View {
             .padding(16).frame(maxWidth: 1100).frame(maxWidth: .infinity)
         }
         .refreshable { await SteamGamesSection.refresh() }
-        .modifier(DriveSheets(open: { selected = $0 }))
         .onReceive(controller.commands) { command in
             guard tab == 0, selected == nil, !browser, !onboarding.presented else { return }
             let items = focusOrder

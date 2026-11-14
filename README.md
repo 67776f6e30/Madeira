@@ -125,7 +125,6 @@ containing the iOS work; upstream clones will not build here.
 | The game library | [`docs/LIBRARY.md`](docs/LIBRARY.md) |
 | Steam sign-in, library and downloads | [`docs/STEAM_SIGNIN.md`](docs/STEAM_SIGNIN.md), [`docs/STEAM_LIBRARY.md`](docs/STEAM_LIBRARY.md) |
 | Steam Cloud saves | [`docs/STEAM_CLOUD.md`](docs/STEAM_CLOUD.md) |
-| Google Drive downloads and OAuth setup | [`docs/GOOGLE_DRIVE.md`](docs/GOOGLE_DRIVE.md) |
 | Madeira Dock (the Steam client) | [`docs/MADEIRA_DOCK.md`](docs/MADEIRA_DOCK.md) |
 | 32-bit games (WoW64) | [`docs/WOW64.md`](docs/WOW64.md) |
 | Controllers and touch controls | [`docs/CONTROLLERS.md`](docs/CONTROLLERS.md) |

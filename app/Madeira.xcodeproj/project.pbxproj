@@ -7,12 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1008D01 /* DriveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2008D01 /* DriveModels.swift */; };
-		A1008D02 /* DriveAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2008D02 /* DriveAuth.swift */; };
-		A1008D03 /* DriveAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2008D03 /* DriveAPI.swift */; };
-		A1008D04 /* DriveStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2008D04 /* DriveStorage.swift */; };
-		A1008D05 /* DriveDownloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2008D05 /* DriveDownloads.swift */; };
-		A1008D06 /* DriveGames.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2008D06 /* DriveGames.swift */; };
 		A1000E07 /* EpicCloudSaves.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000E07 /* EpicCloudSaves.swift */; };
 		A1000E06 /* EpicCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000E06 /* EpicCloud.swift */; };
 		A1000520 /* MadeiraDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000520 /* MadeiraDock.swift */; };
@@ -291,12 +285,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A2008D01 /* DriveModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DriveModels.swift"; sourceTree = "<group>"; };
-		A2008D02 /* DriveAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DriveAuth.swift"; sourceTree = "<group>"; };
-		A2008D03 /* DriveAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DriveAPI.swift"; sourceTree = "<group>"; };
-		A2008D04 /* DriveStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DriveStorage.swift"; sourceTree = "<group>"; };
-		A2008D05 /* DriveDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DriveDownloads.swift"; sourceTree = "<group>"; };
-		A2008D06 /* DriveGames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DriveGames.swift"; sourceTree = "<group>"; };
 		A2000E07 /* EpicCloudSaves.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SwiftEpic/EpicCloudSaves.swift"; sourceTree = "<group>"; };
 		A2000E06 /* EpicCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EpicCloud.swift"; sourceTree = "<group>"; };
 		A2000520 /* MadeiraDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MadeiraDock.swift"; sourceTree = "<group>"; };
@@ -639,12 +627,6 @@
 				A2007B31 /* itch_7z.h */,
 				A2007B04 /* ItchLibrary.swift */,
 				A2007B05 /* ItchGames.swift */,
-				A2008D01 /* DriveModels.swift */,
-				A2008D02 /* DriveAuth.swift */,
-				A2008D03 /* DriveAPI.swift */,
-				A2008D04 /* DriveStorage.swift */,
-				A2008D05 /* DriveDownloads.swift */,
-				A2008D06 /* DriveGames.swift */,
 				A2006A01 /* GOGLibrary.swift */,
 				A2006A02 /* GOGGames.swift */,
 				A2006A03 /* GOGAPI.swift */,
@@ -1116,12 +1098,6 @@
 				A1007B30 /* SwiftItch/itch_7z.c in Sources */,
 				A1007B04 /* ItchLibrary.swift in Sources */,
 				A1007B05 /* ItchGames.swift in Sources */,
-				A1008D01 /* DriveModels.swift in Sources */,
-				A1008D02 /* DriveAuth.swift in Sources */,
-				A1008D03 /* DriveAPI.swift in Sources */,
-				A1008D04 /* DriveStorage.swift in Sources */,
-				A1008D05 /* DriveDownloads.swift in Sources */,
-				A1008D06 /* DriveGames.swift in Sources */,
 				A1006A01 /* GOGLibrary.swift in Sources */,
 				A1006A02 /* GOGGames.swift in Sources */,
 				A1006A03 /* SwiftGOG/GOGAPI.swift in Sources */,

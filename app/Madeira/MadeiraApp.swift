@@ -3,7 +3,6 @@ import SwiftUI
 
 @main
 struct MadeiraApp: App {
-    @UIApplicationDelegateAdaptor(DriveAppDelegate.self) private var driveDelegate
     init() {
         // Opt-in iPhone pointer experiments (PhonePointer.m): before any scene exists.
         madeira_phone_pointer_setup()
@@ -25,7 +24,6 @@ struct MadeiraApp: App {
         ProfileUnification.run()
         // Games and downloads keep going when Madeira leaves the screen (BackgroundRun.swift).
         BackgroundRun.shared.start()
-        DriveDownloads.shared.start()
         // Read the cached library before the first grid page is built.
         if LibraryGridArm.enabled, SteamOwnedLibrary.enabled { SteamOwnedLibrary.shared.start() }
     }
