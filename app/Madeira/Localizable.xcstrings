@@ -3,50 +3,200 @@
   "strings": {
     "Cancel launch": {
       "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start abbrechen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar inicio"
+          }
+        },
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "실행 취소"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar inicialização"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отменить запуск"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消启动"
           }
         }
       }
     },
     "Stop and return to library": {
       "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beenden und zur Bibliothek zurückkehren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detener y volver a la biblioteca"
+          }
+        },
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "중단하고 라이브러리로"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parar e voltar à biblioteca"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Остановить и вернуться в библиотеку"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止并返回游戏库"
           }
         }
       }
     },
     "Stopping session…": {
       "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sitzung wird beendet …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deteniendo la sesión…"
+          }
+        },
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "세션을 종료하는 중…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Encerrando a sessão…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сеанс останавливается…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在停止会话…"
           }
         }
       }
     },
     "Returning to the library when the session closes…": {
       "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rückkehr zur Bibliothek, sobald die Sitzung beendet ist …"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volviendo a la biblioteca cuando se cierre la sesión…"
+          }
+        },
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "세션이 종료되면 라이브러리로 돌아갑니다…"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voltando à biblioteca quando a sessão for encerrada…"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Возврат в библиотеку после закрытия сеанса…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话关闭后将返回游戏库…"
           }
         }
       }
     },
     "The session did not close. Close Madeira and open it again to return to the library.": {
       "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Sitzung wurde nicht beendet. Schließe Madeira und öffne es erneut, um zur Bibliothek zurückzukehren."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La sesión no se cerró. Cierra Madeira y vuelve a abrirlo para volver a la biblioteca."
+          }
+        },
         "ko": {
           "stringUnit": {
             "state": "translated",
             "value": "세션이 종료되지 않았습니다. Madeira를 닫고 다시 열면 라이브러리로 돌아갑니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A sessão não foi encerrada. Feche o Madeira e abra-o novamente para voltar à biblioteca."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сеанс не закрылся. Закройте Madeira и откройте снова, чтобы вернуться в библиотеку."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "会话未能关闭。请关闭 Madeira 并重新打开以返回游戏库。"
           }
         }
       }
@@ -4127,46 +4277,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已请求关闭。请确认游戏内的退出对话框。"
-          }
-        }
-      }
-    },
-    "Close session": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sitzung schließen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cerrar sesión de juego"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "세션 닫기"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fechar sessão"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Закрыть сеанс"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "关闭会话"
           }
         }
       }
