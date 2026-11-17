@@ -561,44 +561,41 @@ static NSString *madeira_reg_escape(NSString *s)
     return out;
 }
 
-static void madeira_japanese_prefix(NSString *prefix)
+/* Copy a bundled font into C:\windows\Fonts (again when the bundled file
+ * changed size) and map Windows font names onto its family with
+ * HKCU\Software\Wine\Fonts\Replacements, which both GDI (win32u) and
+ * DirectWrite (dwrite's system collection) honour. A replacement only applies
+ * while no real font of that name is installed. Shared by the Japanese and
+ * Korean fonts; tag is the log tag ("japanese", "korean"). */
+static void madeira_install_cjk_font(NSString *prefix, const char *tag, NSString *folder,
+                                     NSString *fontFile, NSString *family, NSArray<NSString *> *names)
 {
-    if (!madeira_japanese_on()) return;
     extern void ws_log(const char *fmt, ...);
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    /* 1. the font, into C:\windows\Fonts (copied again when the bundled file changed size) */
-    static NSString *const fontFile = @"NotoSansJP-Regular.otf";
-    static NSString *const family = @"Noto Sans JP";
+    /* 1. the font, into C:\windows\Fonts */
     NSString *src = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:
-                     [@"fonts-ja" stringByAppendingPathComponent:fontFile]];
+                     [folder stringByAppendingPathComponent:fontFile]];
     NSString *fontsDir = [prefix stringByAppendingPathComponent:@"drive_c/windows/Fonts"];
     NSString *dst = [fontsDir stringByAppendingPathComponent:fontFile];
     unsigned long long srcSize = [[fm attributesOfItemAtPath:src error:nil] fileSize];
     if (!srcSize) {
-        ws_log("[japanese] fonts-ja/%s missing from the bundle; Japanese text needs a font the game brings", fontFile.UTF8String);
-    } else if ([[fm attributesOfItemAtPath:dst error:nil] fileSize] != srcSize) {
+        ws_log("[%s] %s/%s missing from the bundle; this text needs a font the game brings",
+               tag, folder.UTF8String, fontFile.UTF8String);
+        return;
+    }
+    if ([[fm attributesOfItemAtPath:dst error:nil] fileSize] != srcSize) {
         [fm createDirectoryAtPath:fontsDir withIntermediateDirectories:YES attributes:nil error:nil];
         [fm removeItemAtPath:dst error:nil];
         NSError *err = nil;
         BOOL ok = [fm copyItemAtPath:src toPath:dst error:&err];
-        ws_log("[japanese] %s %s C:\\windows\\Fonts", fontFile.UTF8String, ok ? "copied to" : "could NOT be copied to");
+        ws_log("[%s] %s %s C:\\windows\\Fonts", tag, fontFile.UTF8String, ok ? "copied to" : "could NOT be copied to");
     }
 
-    /* 2. the Windows Japanese font names → the bundled family (user.reg, HKCU) */
-    NSArray<NSString *> *names = @[
-        @"MS Gothic", @"MS PGothic", @"MS UI Gothic", @"MS Mincho", @"MS PMincho",
-        @"\uFF2D\uFF33 \u30B4\u30B7\u30C3\u30AF",          /* ＭＳ ゴシック */
-        @"\uFF2D\uFF33 \uFF30\u30B4\u30B7\u30C3\u30AF",    /* ＭＳ Ｐゴシック */
-        @"\uFF2D\uFF33 \u660E\u671D",                      /* ＭＳ 明朝 */
-        @"\uFF2D\uFF33 \uFF30\u660E\u671D",                /* ＭＳ Ｐ明朝 */
-        @"Meiryo", @"Meiryo UI", @"\u30E1\u30A4\u30EA\u30AA",   /* メイリオ */
-        @"Yu Gothic", @"Yu Gothic UI", @"Yu Mincho",
-        @"\u6E38\u30B4\u30B7\u30C3\u30AF", @"\u6E38\u660E\u671D",   /* 游ゴシック, 游明朝 */
-    ];
+    /* 2. the Windows font names → the bundled family (user.reg, HKCU) */
     NSString *regPath = [prefix stringByAppendingPathComponent:@"user.reg"];
     NSString *reg = [NSString stringWithContentsOfFile:regPath encoding:NSUTF8StringEncoding error:nil];
-    if (!reg.length) { ws_log("[japanese] user.reg not readable yet; font names not mapped this time"); return; }
+    if (!reg.length) { ws_log("[%s] user.reg not readable yet; font names not mapped this time", tag); return; }
     NSMutableArray<NSString *> *lines = [[reg componentsSeparatedByString:@"\n"] mutableCopy];
     NSString *header = @"[software\\\\wine\\\\fonts\\\\replacements]";
     NSInteger start = -1;
@@ -631,8 +628,69 @@ static void madeira_japanese_prefix(NSString *prefix)
     NSString *text = [lines componentsJoinedByString:@"\n"];
     if (![text hasSuffix:@"\n"]) text = [text stringByAppendingString:@"\n"];
     BOOL ok = [text writeToFile:regPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    ws_log("[japanese] %u Japanese font names %s %s in user.reg", added, ok ? "mapped to" : "could NOT be mapped to",
+    ws_log("[%s] %u font names %s %s in user.reg", tag, added, ok ? "mapped to" : "could NOT be mapped to",
            family.UTF8String);
+}
+
+static void madeira_japanese_prefix(NSString *prefix)
+{
+    if (!madeira_japanese_on()) return;
+    madeira_install_cjk_font(prefix, "japanese", @"fonts-ja", @"NotoSansJP-Regular.otf", @"Noto Sans JP", @[
+        @"MS Gothic", @"MS PGothic", @"MS UI Gothic", @"MS Mincho", @"MS PMincho",
+        @"\uFF2D\uFF33 \u30B4\u30B7\u30C3\u30AF",          /* ＭＳ ゴシック */
+        @"\uFF2D\uFF33 \uFF30\u30B4\u30B7\u30C3\u30AF",    /* ＭＳ Ｐゴシック */
+        @"\uFF2D\uFF33 \u660E\u671D",                      /* ＭＳ 明朝 */
+        @"\uFF2D\uFF33 \uFF30\u660E\u671D",                /* ＭＳ Ｐ明朝 */
+        @"Meiryo", @"Meiryo UI", @"\u30E1\u30A4\u30EA\u30AA",   /* メイリオ */
+        @"Yu Gothic", @"Yu Gothic UI", @"Yu Mincho",
+        @"\u6E38\u30B4\u30B7\u30C3\u30AF", @"\u6E38\u660E\u671D",   /* 游ゴシック, 游明朝 */
+    ]);
+}
+
+/* Korean font (env.MADEIRA_KOREAN; on by default when Wine's locale is Korean).
+ *
+ * Wine brings no font with Hangul, so on a phone set to Korean every program
+ * that draws Korean text -- launchers (Battle.net's Qt window and its Chromium
+ * sign-in page), installers, Korean games -- shows it as empty squares. This
+ * installs the bundled Noto Sans KR (fonts-ko/NotoSansKR-Regular.ttf, SIL OFL
+ * 1.1) into C:\windows\Fonts and maps the Windows Korean font names onto it
+ * (Malgun Gothic, Gulim, Dotum, Batang, Gungsuh and their Korean names), plus
+ * Noto Sans CJK KR, the family Wine's DirectWrite system fallback asks for
+ * Hangul (dlls/dwrite/analyzer.c). The locale itself is left alone: Wine
+ * already takes ko-KR (code page 949) from the device's language.
+ *   MADEIRA_KOREAN = 1  always, = 0  never, unset: when LC_ALL / LANG start
+ *   with "ko", or, with neither set, when the device's first preferred
+ *   language is Korean (the same source Wine's user locale comes from).
+ * Log tag [korean]. */
+static int madeira_korean_on(void)
+{
+    const char *e = getenv("MADEIRA_KOREAN");
+    char v[16];
+    if (e && *e) return e[0] == '1';
+    if (madeira_cfg_get("env.MADEIRA_KOREAN", v, sizeof v) && v[0]) return v[0] == '1';
+    const char *lc = getenv("LC_ALL");
+    if (!lc || !*lc) lc = getenv("LANG");
+    if (lc && *lc) return strncmp(lc, "ko", 2) == 0;
+    NSString *lang = [NSLocale preferredLanguages].firstObject;
+    return [lang hasPrefix:@"ko"];
+}
+
+static void madeira_korean_prefix(NSString *prefix)
+{
+    if (!madeira_korean_on()) return;
+    madeira_install_cjk_font(prefix, "korean", @"fonts-ko", @"NotoSansKR-Regular.ttf", @"Noto Sans KR", @[
+        @"Malgun Gothic", @"Malgun Gothic Semilight",
+        @"\uB9D1\uC740 \uACE0\uB515",          /* 맑은 고딕 */
+        @"Gulim", @"GulimChe", @"New Gulim",
+        @"\uAD74\uB9BC", @"\uAD74\uB9BC\uCCB4", @"\uC0C8\uAD74\uB9BC",   /* 굴림, 굴림체, 새굴림 */
+        @"Dotum", @"DotumChe",
+        @"\uB3CB\uC6C0", @"\uB3CB\uC6C0\uCCB4",                        /* 돋움, 돋움체 */
+        @"Batang", @"BatangChe",
+        @"\uBC14\uD0D5", @"\uBC14\uD0D5\uCCB4",                        /* 바탕, 바탕체 */
+        @"Gungsuh", @"GungsuhChe",
+        @"\uAD81\uC11C", @"\uAD81\uC11C\uCCB4",                        /* 궁서, 궁서체 */
+        @"Noto Sans CJK KR",
+    ]);
 }
 
 /***********************************************************************
@@ -691,6 +749,7 @@ void madeira_seed_prefix_if_needed(const char *prefix_path) {
         madeira_undo_appdata_skeleton( prefix );
         madeira_ensure_locallow( prefix );
         madeira_japanese_prefix( prefix );
+        madeira_korean_prefix( prefix );
     }
 }
 

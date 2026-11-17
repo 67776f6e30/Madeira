@@ -1170,6 +1170,14 @@ OVERLAY = {
                         "not found. Read at every request."},
     "env.MADEIRA_JAPANESE": {"category": "Wine core (ntdll)", "title": "Japanese locale and fonts", "kind": "bool", "default": "0",
                 "note": "Default off. 1: the game runs with a Japanese system and user locale (LC_ALL = ja_JP.UTF-8, ANSI and OEM code page 932) and the extra code page tables (env.MADEIRA_NLS_EXTRA), and a Japanese font (Noto Sans JP) is installed in C:\\windows\\Fonts with MS Gothic, MS PGothic, MS UI Gothic, MS Mincho, Meiryo and Yu Gothic mapped onto it. For Japanese games and visual novels whose text shows as squares or gibberish, or that do not start. Game details › Compatibility › Japanese locale sets it for one game. Logged as [japanese]. Read at session start."},
+    "env.MADEIRA_KOREAN": {"category": "Wine core (ntdll)", "title": "Korean font", "kind": "choice", "default": "",
+                "choices": [("", "When Wine's locale is Korean (default)"), ("1", "Always"), ("0", "Never")],
+                "note": "Default: on when Wine's locale is Korean (env.LC_ALL or LANG starting with ko, or, with neither set, "
+                        "the device's first language). Wine has no font with Hangul, so Korean text shows as squares. On, "
+                        "the bundled Noto Sans KR is installed in C:\\windows\\Fonts and Malgun Gothic, Gulim, Dotum, Batang, "
+                        "Gungsuh (with their Korean names) and Noto Sans CJK KR, the family Wine's DirectWrite fallback asks "
+                        "for Hangul, are mapped onto it; a real font of one of those names keeps priority. The locale is left "
+                        "alone. Logged as [korean]. Read at session start."},
     "env.MADEIRA_ALIAS_RELEASE": {"category": "Memory & JIT pool", "title": "Drop a released arena's code copies", "kind": "bool",
                 "default": "0",
                 "note": "Default off. 1: anonymous memory the game made executable (copied into the JIT pool) follows the game's "
