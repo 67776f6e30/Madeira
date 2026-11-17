@@ -3967,6 +3967,20 @@ DECLSPEC_EXPORT void wine_ios_child_main( int argc, char *argv[], int child_fd_s
         if (child_is_i386)
         {
             CHILD_STAGE( "guest-window-reserve" );
+            /* This thread has no TEB yet. A value left in the TEB key (a
+             * recycled thread whose previous user ended without clearing it)
+             * would make ios_wow_slot_current() resolve that thread's process
+             * and its window; clear it so the window reserved here is found
+             * only through this thread as its owner. */
+            {
+                extern pthread_key_t ios_teb_tls_key;
+                if (ios_teb_tls_key && pthread_getspecific( ios_teb_tls_key ))
+                {
+                    dprintf( STDERR_FILENO, "[Wine child] stale TEB %p in the TEB key of a booting thread: cleared\n",
+                             pthread_getspecific( ios_teb_tls_key ) );
+                    pthread_setspecific( ios_teb_tls_key, NULL );
+                }
+            }
             status = ios_wow_window_reserve();
             dprintf(STDERR_FILENO, "[Wine child] i386 image %s machine=0x%x window=%p reserve=0x%x\n",
                     argc > 1 ? argv[1] : "(none)", ios_child_main_machine,

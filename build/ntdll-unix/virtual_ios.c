@@ -12155,10 +12155,35 @@ static NTSTATUS ios_wow_window_reserve_once(void)
     ios_wow_reclaim_dead_windows();
 
     pthread_mutex_lock( &ios_wow_mutex );
-    if (ios_wow_slot_current())
     {
-        pthread_mutex_unlock( &ios_wow_mutex );
-        return STATUS_SUCCESS;   /* already have one */
+        /* Only a window this booting thread reserved and nobody has bound yet
+         * is "already ours": both callers run before the process's PEB exists,
+         * so a slot bound to a PEB belongs to another, running process. Device
+         * log 2026-11-18 (Battle.net, eight 32-bit processes): a third
+         * renderer resolved the second renderer's live window here, booted
+         * inside it (child_peb 0x7701960000 in B=0x7700000000) and crashed in
+         * wow64.dll at its first instruction (write to 0x480). Such a slot is
+         * left alone, and this thread stops being its owner, so the owner
+         * fallback of ios_wow_slot_current() finds only the window reserved
+         * below. MADEIRA_WOW_STALE_SLOT_REUSE=1 restores the old behaviour. */
+        struct ios_wow_window *cur = ios_wow_slot_current();
+        const char *old = getenv( "MADEIRA_WOW_STALE_SLOT_REUSE" );
+
+        if (cur && (!cur->peb || (old && old[0] == '1')))
+        {
+            pthread_mutex_unlock( &ios_wow_mutex );
+            return STATUS_SUCCESS;   /* already have one */
+        }
+        if (cur)
+        {
+            dprintf( 2, "[wow-window] slot %d B=%p is bound to running peb=%p but resolved as this booting "
+                        "thread's window (stale TEB reference or reused thread handle): not shared, "
+                        "reserving a window of its own\n",
+                     (int)(cur - ios_wow_windows), (void *)cur->base, cur->peb );
+            for (i = 0; i < ios_wow_window_count; i++)
+                if (ios_wow_windows[i].peb && pthread_equal( ios_wow_windows[i].owner, pthread_self() ))
+                    memset( &ios_wow_windows[i].owner, 0, sizeof(ios_wow_windows[i].owner) );
+        }
     }
     for (i = 0; i < IOS_WOW_MAX_WINDOWS; i++)
     {
